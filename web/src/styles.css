@@ -1043,6 +1043,107 @@ input {
   border-left: 4px solid rgba(167, 52, 43, .52);
 }
 
+.war-pulse > button {
+  margin-top: 10px;
+  min-height: 36px;
+  color: var(--ink);
+  background: rgba(255, 248, 232, .78);
+  border: 1px solid rgba(58, 48, 38, .2);
+}
+
+.diplomacy-layout {
+  display: grid;
+  grid-template-columns: 330px 1fr;
+  gap: 14px;
+}
+
+.diplomacy-state-card,
+.diplomacy-option {
+  padding: 14px;
+  background: rgba(255, 248, 232, .72);
+  border: 1px solid rgba(58, 48, 38, .18);
+}
+
+.diplomacy-state-card h2 {
+  margin: 0 0 8px;
+}
+
+.diplomacy-state-card p,
+.diplomacy-option p {
+  line-height: 1.5;
+}
+
+.diplomacy-stat-grid {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.diplomacy-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.diplomacy-option {
+  min-height: 250px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.diplomacy-option.disabled {
+  opacity: .58;
+}
+
+.diplomacy-option-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.diplomacy-option-head b,
+.diplomacy-option small,
+.diplomacy-option em {
+  display: block;
+}
+
+.diplomacy-option-head span {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.diplomacy-effect-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diplomacy-effect-list span {
+  padding: 4px 7px;
+  background: rgba(216, 196, 154, .24);
+  border: 1px solid rgba(58, 48, 38, .14);
+  font-size: 12px;
+}
+
+.diplomacy-option small,
+.diplomacy-option em {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.diplomacy-option button {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 4px;
+  color: var(--paper);
+  background: linear-gradient(180deg, #b74135, #81291f);
+  border: 1px solid rgba(101, 28, 21, .32);
+}
+
 .court-layout {
   grid-template-columns: 1.1fr .9fr 220px;
 }
@@ -1529,6 +1630,8 @@ input {
   .court-layout,
   .report-grid,
   .debate-layout,
+  .diplomacy-layout,
+  .diplomacy-options,
   .postmortem-grid,
   .people-layout,
   .relation-grid,

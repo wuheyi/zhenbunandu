@@ -72,6 +72,10 @@ class ClockMitigationRequest(BaseModel):
     action: str = "appease"
 
 
+class DiplomacyActionRequest(BaseModel):
+    action: str = "stall"
+
+
 def api_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail={"message": str(exc)})
 
@@ -194,6 +198,14 @@ def logistics_route_action(route_id: str, request: RouteActionRequest) -> dict[s
 def faction_clock_mitigation(clock_id: str, request: ClockMitigationRequest) -> dict[str, Any]:
     try:
         return session.mitigate_faction_clock(clock_id, request.action)
+    except Exception as exc:
+        raise api_error(exc) from exc
+
+
+@app.post("/api/diplomacy/action")
+def diplomacy_action(request: DiplomacyActionRequest) -> dict[str, Any]:
+    try:
+        return session.diplomacy_action(request.action)
     except Exception as exc:
         raise api_error(exc) from exc
 

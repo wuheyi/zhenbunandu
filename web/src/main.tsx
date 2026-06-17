@@ -17,10 +17,10 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { Army, CourtCase, Directive, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region } from "./types";
+import type { Army, CourtCase, Directive, DiplomacyOption, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region } from "./types";
 import "./styles.css";
 
-type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater";
+type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater" | "diplomacy";
 type MapMode = "north" | "city" | "logistics" | "diplomacy";
 
 const portraitIndex: Record<string, number> = {
@@ -129,7 +129,7 @@ function App() {
       setSelectedNode(focus.node);
       return;
     }
-    if (["secret", "decree", "report", "court", "history", "debate", "people", "ledger", "theater"].includes(kind)) {
+    if (["secret", "decree", "report", "court", "history", "debate", "people", "ledger", "theater", "diplomacy"].includes(kind)) {
       setModal(kind as ModalName);
     }
   }, [state?.events]);
@@ -161,6 +161,22 @@ function App() {
     setError("");
     try {
       const data = await api<{ state: GameState }>(`/api/faction_clocks/${encodeURIComponent(clockId)}/mitigate`, {
+        method: "POST",
+        body: JSON.stringify({ action })
+      });
+      setState(data.state);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleDiplomacyAction = async (action: string) => {
+    setBusy("处置外交中...");
+    setError("");
+    try {
+      const data = await api<{ state: GameState }>("/api/diplomacy/action", {
         method: "POST",
         body: JSON.stringify({ action })
       });
@@ -284,7 +300,7 @@ function App() {
               <button className="cinnabar small-wide" onClick={() => setModal("court")}>开殿前对质</button>
             )}
           </section>
-          <WarPulsePanel state={state} />
+          <WarPulsePanel state={state} onDiplomacy={() => setModal("diplomacy")} />
         </aside>
       </main>
 
@@ -300,6 +316,7 @@ function App() {
         onPeople={() => setModal("people")}
         onLedger={() => setModal("ledger")}
         onTheater={() => setModal("theater")}
+        onDiplomacy={() => setModal("diplomacy")}
       />
 
       {modal === "audience" && selectedMinister && (
@@ -406,6 +423,10 @@ function App() {
 
       {modal === "theater" && (
         <TheaterModal state={state} busy={busy} onRouteAction={handleRouteAction} onClose={() => setModal("none")} />
+      )}
+
+      {modal === "diplomacy" && (
+        <DiplomacyModal state={state} busy={busy} onAction={handleDiplomacyAction} onClose={() => setModal("none")} />
       )}
 
       {modal === "llm" && (
@@ -677,6 +698,7 @@ function CommandDock(props: {
   onPeople: () => void;
   onLedger: () => void;
   onTheater: () => void;
+  onDiplomacy: () => void;
 }) {
   const readyCases = props.state.court_cases.filter((item) => item.status === "ready").length;
   return (
@@ -687,6 +709,7 @@ function CommandDock(props: {
       <CommandButton icon={<Eye />} label="密令" sub={`${props.state.secret_orders.filter((o) => o.status === "active").length} 进行中`} onClick={props.onSecret} />
       <CommandButton icon={<Scale />} label="对质" sub={readyCases ? `${readyCases} 案可开` : "证据不足"} onClick={props.onCourt} />
       <CommandButton icon={<FilePenLine />} label="拟旨" sub={`${props.state.directives.filter((d) => d.status !== "issued").length} 道草案`} onClick={props.onDecree} />
+      <CommandButton icon={<Flag />} label="外交" sub={props.state.diplomacy.status} onClick={props.onDiplomacy} />
       <button className="issue-seal" onClick={props.onDecree}>
         <Stamp size={32} />
         <span>颁诏</span>
@@ -901,7 +924,7 @@ function DecreeModal({ state, busy, settleLog, onClose, onState, onIssue }: { st
   );
 }
 
-function WarPulsePanel({ state }: { state: GameState }) {
+function WarPulsePanel({ state, onDiplomacy }: { state: GameState; onDiplomacy: () => void }) {
   const diplomacy = state.diplomacy || { status: "未接触", demand_severity: 0, impatience: 0 };
   const routes = state.logistics_routes || [];
   const hotClock = [...(state.faction_clocks || [])].sort((a, b) => b.value - a.value)[0];
@@ -935,7 +958,73 @@ function WarPulsePanel({ state }: { state: GameState }) {
       ) : (
         <p className="muted">尚无正式战报。若金军威压继续上升，宣化门夜攻将成为第一场检验。</p>
       )}
+      <button className="small-wide" onClick={onDiplomacy}>处置金宋谈判</button>
     </section>
+  );
+}
+
+function DiplomacyModal({
+  state,
+  busy,
+  onAction,
+  onClose
+}: {
+  state: GameState;
+  busy: string;
+  onAction: (action: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const diplomacy = state.diplomacy;
+  return (
+    <Modal title="金宋谈判" onClose={onClose} wide>
+      <div className="diplomacy-layout">
+        <section className="diplomacy-state-card">
+          <h2>{diplomacy.status}</h2>
+          <p>{diplomacy.current_demand}</p>
+          <div className="diplomacy-stat-grid">
+            <MetricLine label="条件" value={diplomacy.demand_severity} dangerHigh />
+            <MetricLine label="信任" value={diplomacy.trust} />
+            <MetricLine label="急躁" value={diplomacy.impatience} dangerHigh />
+            <MetricLine label="内讧" value={diplomacy.internal_tension} />
+            <MetricLine label="筹码" value={diplomacy.leverage} />
+          </div>
+        </section>
+        <section className="diplomacy-options">
+          {state.diplomacy_options.map((option) => (
+            <DiplomacyOptionCard key={option.action} option={option} busy={busy} onAction={onAction} />
+          ))}
+        </section>
+      </div>
+    </Modal>
+  );
+}
+
+function DiplomacyOptionCard({
+  option,
+  busy,
+  onAction
+}: {
+  option: DiplomacyOption;
+  busy: string;
+  onAction: (action: string) => Promise<void>;
+}) {
+  return (
+    <article className={`diplomacy-option ${option.available ? "" : "disabled"}`}>
+      <div className="diplomacy-option-head">
+        <b>{option.title}</b>
+        <span>{option.cost}</span>
+      </div>
+      <p>{option.intent}</p>
+      <div className="diplomacy-effect-list">
+        {option.effects.map((effect) => <span key={effect}>{effect}</span>)}
+      </div>
+      <small>收益：{option.benefit}</small>
+      <small>风险：{option.risk}</small>
+      {!option.available && <em>{option.disabled_reason}</em>}
+      <button disabled={!!busy || !option.available} onClick={() => onAction(option.action)}>
+        {busy === "处置外交中..." ? "处置中" : "执行"}
+      </button>
+    </article>
   );
 }
 

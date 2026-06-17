@@ -30,6 +30,7 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert any(minister["id"] == "li_gang" for minister in state["ministers"])
     assert len(state["logistics_routes"]) == 3
     assert len(state["faction_clocks"]) >= 5
+    assert {option["action"] for option in state["diplomacy_options"]} >= {"stall", "tribute", "hardline", "divide"}
     assert state["diplomacy"]["status"] == "未接触"
     assert state["guidance"]["stage"] == "初登大宝"
     assert any(tip["target"] == "minister:li_gang" for tip in state["guidance"]["tips"])
@@ -95,6 +96,21 @@ def test_route_actions_and_faction_clocks_update_state(tmp_path: Path) -> None:
     assert after_clock["value"] < before_clock["value"]
 
 
+def test_diplomacy_actions_update_pressure_and_records(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    before = game.state()
+    result = game.diplomacy_action("stall")
+    after = result["state"]
+    assert after["diplomacy"]["status"] == "拖延谈判"
+    assert after["diplomacy"]["impatience"] < before["diplomacy"]["impatience"]
+    assert after["diplomacy"]["leverage"] > before["diplomacy"]["leverage"]
+    assert after["ledger"][0]["category"] == "外交礼物"
+
+    divided = game.diplomacy_action("divide")["state"]
+    assert divided["diplomacy"]["internal_tension"] > after["diplomacy"]["internal_tension"]
+    assert divided["ledger"][0]["visibility"] == "秘密"
+
+
 def test_second_turn_can_generate_night_attack_report(tmp_path: Path) -> None:
     game = make_session(tmp_path)
     game.minister_chat("li_gang", "守城")
@@ -133,6 +149,17 @@ def test_api_route_action_and_clock_mitigation_endpoints() -> None:
     clock_response = client.post("/api/faction_clocks/grain_market_strike/mitigate", json={"action": "appease"})
     assert clock_response.status_code == 200
     assert next(clock for clock in clock_response.json()["state"]["faction_clocks"] if clock["id"] == "grain_market_strike")["value"] <= 4
+
+
+def test_api_diplomacy_action_endpoint() -> None:
+    api_session.new_game()
+    client = TestClient(app)
+    response = client.post("/api/diplomacy/action", json={"action": "hardline"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"]["diplomacy"]["status"] == "强硬拒使"
+    assert payload["state"]["diplomacy"]["leverage"] > 22
+    assert payload["state"]["siege"]["defender_will"] > 45
 
 
 def test_llm_without_key_uses_fallback(tmp_path: Path) -> None:

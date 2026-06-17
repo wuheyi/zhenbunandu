@@ -34,6 +34,18 @@ export type DiplomacyState = {
   status: string;
 };
 
+export type DiplomacyOption = {
+  action: string;
+  title: string;
+  intent: string;
+  cost: string;
+  benefit: string;
+  risk: string;
+  effects: string[];
+  available: boolean;
+  disabled_reason: string;
+};
+
 export type EventItem = {
   id: string;
   title: string;
@@ -308,6 +320,7 @@ export type GameState = {
   metrics: Metric[];
   siege: SiegeState;
   diplomacy: DiplomacyState;
+  diplomacy_options: DiplomacyOption[];
   events: EventItem[];
   issues: Issue[];
   ministers: Minister[];

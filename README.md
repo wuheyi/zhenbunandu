@@ -30,3 +30,9 @@ npm run dev
 PYTHONPATH=backend .venv/bin/pytest -q
 cd web && npm run build
 ```
+
+自动跑局平衡检查：
+
+```bash
+PYTHONPATH=backend .venv/bin/python -m zhenbunandu.autoplay --output /tmp/zhenbunandu-balance
+```

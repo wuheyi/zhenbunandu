@@ -8,6 +8,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from zhenbunandu.app import app, session as api_session
+from zhenbunandu.autoplay import run_autoplay_batch, run_single_autoplay
 from zhenbunandu.content import load_content
 from zhenbunandu.db import GameDB
 from zhenbunandu.llm import DEFAULT_LLM_MODEL, LLMClient
@@ -160,6 +161,37 @@ def test_api_diplomacy_action_endpoint() -> None:
     assert payload["state"]["diplomacy"]["status"] == "强硬拒使"
     assert payload["state"]["diplomacy"]["leverage"] > 22
     assert payload["state"]["siege"]["defender_will"] > 45
+
+
+def test_autoplay_seed_scenarios_change_opening_pressure() -> None:
+    standard = run_single_autoplay("defender", "jingkang-standard-001", max_turns=0)
+    treasury_crash = run_single_autoplay("defender", "treasury-crash-001", max_turns=0)
+    grain_crisis = run_single_autoplay("defender", "grain-crisis-001", max_turns=0)
+
+    assert treasury_crash["seed_profile"]["registered"]
+    assert treasury_crash["final"]["treasury"] < standard["final"]["treasury"]
+    assert grain_crisis["final"]["grain_price"] > standard["final"]["grain_price"]
+    assert grain_crisis["final"]["max_route_risk"] > standard["final"]["max_route_risk"]
+
+
+def test_autoplay_batch_writes_balance_reports(tmp_path: Path) -> None:
+    output_dir = tmp_path / "balance"
+    result = run_autoplay_batch(
+        strategies=["defender", "diplomat"],
+        seeds=["jingkang-standard-001", "jin-rush-001"],
+        max_turns=2,
+        output_dir=output_dir,
+    )
+
+    assert result["summary"]["total_runs"] == 4
+    assert result["summary"]["avg_turns"] == 2
+    assert result["summary"]["strategy_rows"][0]["top_actions"]
+    assert (output_dir / "summary.md").exists()
+    assert (output_dir / "metrics.csv").exists()
+    assert (output_dir / "endings.json").exists()
+    assert (output_dir / "route_compare.md").exists()
+    assert (output_dir / "anomaly_report.md").exists()
+    assert len(list((output_dir / "sample_turns").glob("*.json"))) == 4
 
 
 def test_llm_without_key_uses_fallback(tmp_path: Path) -> None:

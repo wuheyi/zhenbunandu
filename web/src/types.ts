@@ -46,6 +46,21 @@ export type DiplomacyOption = {
   disabled_reason: string;
 };
 
+export type DiplomacyTerm = {
+  id: number;
+  title: string;
+  kind: string;
+  status: string;
+  due_turn: number;
+  compliance: number;
+  breach_risk: number;
+  demand: string;
+  summary: string;
+  result: string;
+  created_turn: number;
+  last_delta: number;
+};
+
 export type EventItem = {
   id: string;
   title: string;
@@ -340,6 +355,7 @@ export type GameState = {
   metrics: Metric[];
   siege: SiegeState;
   diplomacy: DiplomacyState;
+  diplomacy_terms: DiplomacyTerm[];
   diplomacy_options: DiplomacyOption[];
   events: EventItem[];
   issues: Issue[];

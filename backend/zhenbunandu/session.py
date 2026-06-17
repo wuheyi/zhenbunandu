@@ -257,11 +257,13 @@ class GameSession:
         diplomacy: dict[str, Any],
         metrics: list[dict[str, Any]],
         siege: dict[str, Any],
+        terms: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         metric_map = {item["key"]: int(item["value"]) for item in metrics}
         severity = int(diplomacy.get("demand_severity", 0))
         leverage = int(diplomacy.get("leverage", 0))
         defense_total = int(siege.get("city_defense", 0)) + int(siege.get("defender_will", 0)) + leverage
+        active_term = next((term for term in terms or [] if term["status"] == "active"), None)
 
         def option(
             action: str,
@@ -286,7 +288,7 @@ class GameSession:
                 "disabled_reason": disabled_reason,
             }
 
-        return [
+        options = [
             option(
                 "stall",
                 "假议和拖延",
@@ -344,6 +346,24 @@ class GameSession:
                 disabled_reason="金营尚未正式抛出割地质子底线。",
             ),
         ]
+        if active_term:
+            cost = "内帑 2" if active_term["kind"] == "divide" else "国库 4"
+            available_money = metric_map.get("内帑" if active_term["kind"] == "divide" else "国库", 0)
+            options.insert(
+                0,
+                option(
+                    "honor_terms",
+                    "履约安抚",
+                    f"按“{active_term['title']}”补足使费、回书或暗线承诺，避免金营以失信再犯。",
+                    cost,
+                    "履约度上升，失信风险下降，金方急躁小降",
+                    "继续付出钱粮会滋长主和压力，且不能解决守城本身",
+                    ["履约 +25", "失信风险 -20", "急躁 -5", "宋方筹码 +2"],
+                    available=available_money >= (2 if active_term["kind"] == "divide" else 4),
+                    disabled_reason="钱粮不足，暂时无法补足条款承诺。",
+                ),
+            )
+        return options
 
     def test_llm(self) -> dict[str, Any]:
         client = self._llm_client()
@@ -487,6 +507,7 @@ class GameSession:
             route["blocked_nodes"] = sum(1 for node in nodes if int(node["risk"]) >= 55)
         clocks = self.db.rows("SELECT * FROM faction_clocks ORDER BY value DESC, rowid")
         diplomacy = self.db.row("SELECT * FROM diplomacy_state WHERE id = 1") or {}
+        diplomacy_terms = self.db.rows("SELECT * FROM diplomacy_terms ORDER BY status, due_turn, id")
         guidance = self._build_guidance(game, metrics, siege, events, directives, cases, routes, clocks)
         postmortem = self._build_postmortem(game, metrics, siege, issues, routes)
         return {
@@ -494,7 +515,8 @@ class GameSession:
             "metrics": metrics,
             "siege": siege,
             "diplomacy": diplomacy,
-            "diplomacy_options": self._build_diplomacy_options(diplomacy, metrics, siege),
+            "diplomacy_terms": diplomacy_terms,
+            "diplomacy_options": self._build_diplomacy_options(diplomacy, metrics, siege, diplomacy_terms),
             "events": events,
             "issues": issues,
             "ministers": self.db.rows("SELECT * FROM characters ORDER BY rowid"),
@@ -1174,6 +1196,112 @@ class GameSession:
             )
         return {"clock": next_clock, "result": result, "state": self.state()}
 
+    def _create_diplomacy_term(
+        self,
+        *,
+        title: str,
+        kind: str,
+        turn: int,
+        due_in: int,
+        compliance: int,
+        breach_risk: int,
+        summary: str,
+        demand: str,
+    ) -> dict[str, Any]:
+        return self.db.create_diplomacy_term(
+            {
+                "title": title,
+                "kind": kind,
+                "due_turn": turn + due_in,
+                "compliance": compliance,
+                "breach_risk": breach_risk,
+                "summary": summary,
+                "demand": demand,
+                "created_turn": turn,
+            }
+        )
+
+    def _resolve_diplomacy_terms(
+        self,
+        turn: int,
+        metric_deltas: dict[str, int],
+        siege_deltas: dict[str, int],
+        diplomacy_deltas: dict[str, int],
+        timeline: list[str],
+        warnings: list[str],
+    ) -> None:
+        terms = self.db.rows("SELECT * FROM diplomacy_terms WHERE status = 'active' ORDER BY due_turn, id")
+        for term in terms:
+            due_turn = int(term["due_turn"])
+            compliance = int(term["compliance"])
+            breach_risk = int(term["breach_risk"])
+            kind = term["kind"]
+            if due_turn > turn + 1:
+                if kind in {"stall", "tribute"}:
+                    diplomacy_deltas["impatience"] = diplomacy_deltas.get("impatience", 0) - 2
+                continue
+
+            if compliance >= 65 or breach_risk <= 25:
+                result = f"{term['title']}勉强履行，金营暂缓攻势，宋方又争得一段修城、催粮和勤王时间。"
+                self.db.change_diplomacy_term(int(term["id"]), {"status": "fulfilled", "result": result})
+                diplomacy_deltas["trust"] = diplomacy_deltas.get("trust", 0) + 5
+                diplomacy_deltas["impatience"] = diplomacy_deltas.get("impatience", 0) - 7
+                diplomacy_deltas["demand_severity"] = diplomacy_deltas.get("demand_severity", 0) - 4
+                siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) - 4
+                if kind == "divide":
+                    diplomacy_deltas["internal_tension"] = diplomacy_deltas.get("internal_tension", 0) + 8
+                    diplomacy_deltas["leverage"] = diplomacy_deltas.get("leverage", 0) + 4
+                    siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) - 3
+                timeline.append(result)
+                sentiment = "positive"
+            else:
+                result = f"{term['title']}失信，金营斥宋廷反复，使节被留难，攻城与索约口气一并转硬。"
+                self.db.change_diplomacy_term(int(term["id"]), {"status": "breached", "result": result})
+                diplomacy_deltas["trust"] = diplomacy_deltas.get("trust", 0) - 9
+                diplomacy_deltas["impatience"] = diplomacy_deltas.get("impatience", 0) + 11
+                diplomacy_deltas["demand_severity"] = diplomacy_deltas.get("demand_severity", 0) + 8
+                siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) + 8
+                siege_deltas["peace_pressure"] = siege_deltas.get("peace_pressure", 0) + 4
+                metric_deltas["君威"] = metric_deltas.get("君威", 0) - 2
+                warnings.append("外交条款失信，金营可能扣使、加索金银或转入再攻。")
+                timeline.append(result)
+                self.db.upsert_event(
+                    {
+                        "id": f"diplomacy_breach_{term['id']}",
+                        "title": "金营斥宋失信",
+                        "kind": "外交",
+                        "summary": "金使称宋廷只以空文拖延，留难往返使节，并把犒军、质子和罢免主战臣一并加码。",
+                        "urgency": 82,
+                        "severity": 74,
+                        "credibility": 72,
+                        "interests": ["金营", "主和派", "皇城司"],
+                        "audiences": ["主和宰执", "皇城司使", "李纲"],
+                        "actions": ["补足条款", "拒割地质子", "分化金营"],
+                        "status": "active",
+                        "read": 0,
+                        "focus": 1,
+                    }
+                )
+                sentiment = "negative"
+
+            self.db.conn.execute(
+                """INSERT INTO memories
+                   (subject_type, subject_id, turn, title, cause, process, outcome, sentiment, importance, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "diplomacy_term",
+                    str(term["id"]),
+                    turn,
+                    f"外交条款：{term['title']}",
+                    term["demand"],
+                    term["summary"],
+                    result,
+                    sentiment,
+                    4,
+                    json.dumps(["金宋谈判", "外交条款", term["title"]], ensure_ascii=False),
+                ),
+            )
+
     def diplomacy_action(self, action: str = "stall") -> dict[str, Any]:
         diplomacy = self.db.row("SELECT * FROM diplomacy_state WHERE id = 1")
         if not diplomacy:
@@ -1193,6 +1321,16 @@ class GameSession:
                 self.db.change_metric("君威", -2)
                 self.db.change_faction_clock("southern_flight_talk", 4)
                 self.db.change_faction_clock("li_gang_removal", 3)
+                self._create_diplomacy_term(
+                    title="三日复命缓攻",
+                    kind="stall",
+                    turn=turn,
+                    due_in=2,
+                    compliance=42,
+                    breach_risk=48,
+                    summary="使者承诺三日一复命，以含混国书争取修城与勤王时间。",
+                    demand=str(diplomacy.get("current_demand", "")),
+                )
                 status = "拖延谈判"
                 result = "使者以复命、犒军和含混文字争得缓冲，金军攻势稍缓，主和派却更敢言和。"
             elif action == "tribute":
@@ -1207,8 +1345,40 @@ class GameSession:
                 self.db.change_metric("君威", -4)
                 self.db.change_faction_clock("southern_flight_talk", 6)
                 self.db.change_faction_clock("li_gang_removal", 4)
+                self._create_diplomacy_term(
+                    title="犒军暂缓约",
+                    kind="tribute",
+                    turn=turn,
+                    due_in=2,
+                    compliance=58,
+                    breach_risk=34,
+                    summary="宋廷先送一笔犒军银，承诺下月补足使费与回书，以换取金营暂缓攻城。",
+                    demand=str(diplomacy.get("current_demand", "")),
+                )
                 status = "犒军暂缓"
                 result = "犒军银送入金营，攻城节奏暂缓；朝中亦有人以此为真和议张本。"
+            elif action == "honor_terms":
+                active_term = self.db.row(
+                    "SELECT * FROM diplomacy_terms WHERE status = 'active' ORDER BY due_turn, id LIMIT 1"
+                )
+                if not active_term:
+                    raise ValueError("当前没有待履约外交条款。")
+                if active_term["kind"] == "divide":
+                    if self.db.value("内帑") < 2:
+                        raise ValueError("内帑不足，无法续接金营暗线。")
+                    self._record_ledger(turn, "内帑", -2, "外交履约", f"续接{active_term['title']}暗线", "金宋谈判", "秘密")
+                    result = "皇城司续给暗线银，金营争功之隙仍可利用。"
+                else:
+                    if self.db.value("国库") < 4:
+                        raise ValueError("国库不足，无法补足外交使费。")
+                    self._record_ledger(turn, "国库", -4, "外交履约", f"补足{active_term['title']}使费", "金宋谈判")
+                    result = "使费、回书与犒军尾款补上，金营暂少了一个翻脸借口。"
+                self.db.change_diplomacy_term(int(active_term["id"]), {"compliance": 25, "breach_risk": -20})
+                self.db.change_diplomacy("trust", 4)
+                self.db.change_diplomacy("impatience", -5)
+                self.db.change_diplomacy("leverage", 2)
+                self.db.change_siege("peace_pressure", 2)
+                status = "补足条款"
             elif action == "hardline":
                 siege = self.db.row("SELECT * FROM siege_state WHERE id = 1") or {}
                 leverage = int(diplomacy.get("leverage", 0))
@@ -1237,6 +1407,16 @@ class GameSession:
                 self.db.change_diplomacy("trust", -3)
                 self.db.change_siege("jin_pressure", -4)
                 self.db.change_siege("peace_pressure", -2)
+                self._create_diplomacy_term(
+                    title="金营争功暗线",
+                    kind="divide",
+                    turn=turn,
+                    due_in=2,
+                    compliance=50,
+                    breach_risk=28,
+                    summary="皇城司承诺继续给付暗线银，挑动金营诸部争功互疑。",
+                    demand="金营诸部争功，东路军对攻城时机已有分歧。",
+                )
                 status = "离间金营"
                 result = "皇城司暗线入金营，诸部争功互疑，宋方谈判筹码增加。"
                 if int(diplomacy.get("internal_tension", 0)) + 16 >= 42:
@@ -1397,6 +1577,7 @@ class GameSession:
                 self.db.change_faction_clock("transport_slowdown", 3)
                 self.db.change_faction_clock("grain_market_strike", 4)
             clock_warnings = self._apply_faction_clocks(metric_deltas, siege_deltas, timeline)
+            self._resolve_diplomacy_terms(turn, metric_deltas, siege_deltas, diplomacy_deltas, timeline, clock_warnings)
             self._resolve_night_attack(turn, metric_deltas, siege_deltas, timeline)
             for key, delta in metric_deltas.items():
                 if delta:

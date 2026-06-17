@@ -140,6 +140,21 @@ class GameDB:
                 status TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS diplomacy_terms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                due_turn INTEGER NOT NULL,
+                compliance INTEGER NOT NULL,
+                breach_risk INTEGER NOT NULL,
+                demand TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                result TEXT NOT NULL DEFAULT '',
+                created_turn INTEGER NOT NULL,
+                last_delta INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS logistics_routes (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -365,6 +380,7 @@ class GameDB:
             "logistics_routes",
             "route_nodes",
             "diplomacy_state",
+            "diplomacy_terms",
         ]
         with self.conn:
             for table in tables:
@@ -508,6 +524,44 @@ class GameDB:
             return
         parts = ", ".join(f"{field} = ?" for field in updates)
         self.conn.execute(f"UPDATE diplomacy_state SET {parts} WHERE id = 1", list(updates.values()))
+
+    def create_diplomacy_term(self, data: dict[str, Any]) -> dict[str, Any]:
+        state = self.row("SELECT turn FROM game_state WHERE id = 1") or {"turn": 1}
+        cur = self.conn.execute(
+            """INSERT INTO diplomacy_terms
+               (title, kind, status, due_turn, compliance, breach_risk, demand, summary, created_turn)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["title"],
+                data.get("kind", "stall"),
+                data.get("status", "active"),
+                int(data.get("due_turn", int(state["turn"]) + 1)),
+                clamp(int(data.get("compliance", 50))),
+                clamp(int(data.get("breach_risk", 45))),
+                data.get("demand", ""),
+                data.get("summary", ""),
+                int(data.get("created_turn", int(state["turn"]))),
+            ),
+        )
+        return self.row("SELECT * FROM diplomacy_terms WHERE id = ?", (cur.lastrowid,)) or {}
+
+    def change_diplomacy_term(self, term_id: int, changes: dict[str, int | str]) -> dict[str, Any] | None:
+        term = self.row("SELECT * FROM diplomacy_terms WHERE id = ?", (term_id,))
+        if not term:
+            return None
+        next_values: dict[str, int | str] = {}
+        for key, delta in changes.items():
+            if isinstance(delta, int) and key in {"compliance", "breach_risk"}:
+                current = int(term[key])
+                next_values[key] = clamp(current + delta)
+                if key == "compliance":
+                    next_values["last_delta"] = int(next_values[key]) - current
+            else:
+                next_values[key] = delta
+        if next_values:
+            parts = ", ".join(f"{field} = ?" for field in next_values)
+            self.conn.execute(f"UPDATE diplomacy_terms SET {parts} WHERE id = ?", [*next_values.values(), term_id])
+        return self.row("SELECT * FROM diplomacy_terms WHERE id = ?", (term_id,))
 
     def change_route(self, route_id: str, changes: dict[str, int | str]) -> dict[str, Any] | None:
         route = self.row("SELECT * FROM logistics_routes WHERE id = ?", (route_id,))

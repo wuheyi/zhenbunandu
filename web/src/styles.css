@@ -1079,6 +1079,56 @@ input {
   margin-top: 12px;
 }
 
+.diplomacy-terms-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(58, 48, 38, .16);
+}
+
+.subhead-line,
+.diplomacy-term-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.subhead-line span,
+.diplomacy-term-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diplomacy-term {
+  padding: 10px;
+  background: rgba(216, 196, 154, .18);
+  border: 1px solid rgba(58, 48, 38, .14);
+}
+
+.diplomacy-term.breached {
+  border-color: rgba(125, 46, 36, .38);
+  background: rgba(125, 46, 36, .08);
+}
+
+.diplomacy-term.fulfilled {
+  border-color: rgba(47, 111, 115, .32);
+  background: rgba(47, 111, 115, .08);
+}
+
+.diplomacy-term p {
+  margin: 6px 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.term-meter-grid {
+  display: grid;
+  gap: 3px;
+}
+
 .diplomacy-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

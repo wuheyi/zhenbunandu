@@ -34,6 +34,7 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert len(state["faction_clocks"]) >= 5
     assert {option["action"] for option in state["diplomacy_options"]} >= {"stall", "tribute", "hardline", "divide"}
     assert state["diplomacy"]["status"] == "未接触"
+    assert state["diplomacy_terms"] == []
     assert state["guidance"]["stage"] == "初登大宝"
     assert any(tip["target"] == "minister:li_gang" for tip in state["guidance"]["tips"])
     assert state["postmortem"]["status"] == "active"
@@ -140,6 +141,39 @@ def test_diplomacy_actions_update_pressure_and_records(tmp_path: Path) -> None:
     divided = game.diplomacy_action("divide")["state"]
     assert divided["diplomacy"]["internal_tension"] > after["diplomacy"]["internal_tension"]
     assert divided["ledger"][0]["visibility"] == "秘密"
+
+
+def test_diplomacy_terms_can_be_created_and_honored(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    tribute = game.diplomacy_action("tribute")["state"]
+    term = tribute["diplomacy_terms"][0]
+    assert term["title"] == "犒军暂缓约"
+    assert term["status"] == "active"
+    assert any(option["action"] == "honor_terms" for option in tribute["diplomacy_options"])
+
+    honored = game.diplomacy_action("honor_terms")["state"]
+    honored_term = honored["diplomacy_terms"][0]
+    assert honored_term["compliance"] > term["compliance"]
+    assert honored_term["breach_risk"] < term["breach_risk"]
+    assert honored["diplomacy"]["status"] == "补足条款"
+    assert honored["ledger"][0]["category"] == "外交履约"
+
+
+def test_diplomacy_term_breach_resolves_into_report_and_event(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    game.diplomacy_action("stall")
+    term = game.state()["diplomacy_terms"][0]
+    game.db.conn.execute(
+        "UPDATE diplomacy_terms SET due_turn = 1, compliance = 15, breach_risk = 85 WHERE id = ?",
+        (term["id"],),
+    )
+
+    resolved = game.resolve_turn()["state"]
+    breached = resolved["diplomacy_terms"][0]
+    assert breached["status"] == "breached"
+    assert "失信" in breached["result"]
+    assert any(event["id"].startswith("diplomacy_breach_") for event in resolved["events"])
+    assert any("外交条款失信" in warning for warning in resolved["reports"][0]["warnings"])
 
 
 def test_second_turn_can_generate_night_attack_report(tmp_path: Path) -> None:

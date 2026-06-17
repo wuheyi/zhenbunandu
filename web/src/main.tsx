@@ -17,7 +17,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { Army, CourtCase, Directive, DiplomacyOption, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
+import type { Army, CourtCase, Directive, DiplomacyOption, DiplomacyTerm, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
 import "./styles.css";
 
 type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater" | "diplomacy";
@@ -988,6 +988,7 @@ function DiplomacyModal({
             <MetricLine label="内讧" value={diplomacy.internal_tension} />
             <MetricLine label="筹码" value={diplomacy.leverage} />
           </div>
+          <DiplomacyTermsPanel terms={state.diplomacy_terms || []} />
         </section>
         <section className="diplomacy-options">
           {state.diplomacy_options.map((option) => (
@@ -996,6 +997,31 @@ function DiplomacyModal({
         </section>
       </div>
     </Modal>
+  );
+}
+
+function DiplomacyTermsPanel({ terms }: { terms: DiplomacyTerm[] }) {
+  const visibleTerms = terms.slice(0, 4);
+  return (
+    <div className="diplomacy-terms-panel">
+      <div className="subhead-line">
+        <b>条款履约</b>
+        <span>{terms.filter((term) => term.status === "active").length} 项待履</span>
+      </div>
+      {visibleTerms.length ? visibleTerms.map((term) => (
+        <article className={`diplomacy-term ${term.status}`} key={term.id}>
+          <div className="diplomacy-term-head">
+            <b>{term.title}</b>
+            <span>{term.status === "active" ? `限第 ${term.due_turn} 回合` : term.status}</span>
+          </div>
+          <p>{term.result || term.summary}</p>
+          <div className="term-meter-grid">
+            <MetricLine label="履约" value={term.compliance} />
+            <MetricLine label="失信" value={term.breach_risk} dangerHigh />
+          </div>
+        </article>
+      )) : <p className="muted">尚无正式条款。拖延、犒军或分化金营后会留下履约压力。</p>}
+    </div>
   );
 }
 

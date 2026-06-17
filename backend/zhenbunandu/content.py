@@ -31,6 +31,7 @@ class GameContent:
     issues: list[dict[str, Any]]
     directive_templates: list[dict[str, Any]]
     logistics_routes: list[dict[str, Any]]
+    route_nodes: list[dict[str, Any]]
     historical_anchors: list[dict[str, Any]]
 
 
@@ -44,5 +45,6 @@ def load_content() -> GameContent:
         issues=load_json("issues.json"),
         directive_templates=load_json("directive_templates.json"),
         logistics_routes=load_json("logistics_routes.json"),
+        route_nodes=load_json("route_nodes.json"),
         historical_anchors=load_json("historical_anchors.json"),
     )

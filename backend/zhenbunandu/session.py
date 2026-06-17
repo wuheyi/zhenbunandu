@@ -436,6 +436,8 @@ class GameSession:
             self.new_game()
         if not self.db.row("SELECT id FROM faction_clocks LIMIT 1"):
             self.db.seed_faction_clocks()
+        if not self.db.row("SELECT id FROM route_nodes LIMIT 1"):
+            self.db.seed_route_nodes(self.content.route_nodes)
         game = self.db.row("SELECT * FROM game_state WHERE id = 1") or {}
         metrics = self.db.rows("SELECT key, value, last_delta FROM metrics ORDER BY rowid")
         siege = self.db.row("SELECT * FROM siege_state WHERE id = 1") or {}
@@ -473,6 +475,16 @@ class GameSession:
         directives = self.db.rows("SELECT * FROM directives ORDER BY id")
         issues = self.db.rows("SELECT * FROM issues ORDER BY rowid")
         routes = self.db.rows("SELECT * FROM logistics_routes ORDER BY rowid")
+        route_nodes = self.db.rows("SELECT * FROM route_nodes ORDER BY route_id, rowid")
+        nodes_by_route: dict[str, list[dict[str, Any]]] = {}
+        for node in route_nodes:
+            nodes_by_route.setdefault(node["route_id"], []).append(node)
+        for route in routes:
+            nodes = nodes_by_route.get(route["id"], [])
+            route["nodes"] = nodes
+            credit_nodes = [node for node in nodes if node["kind"] in {"market", "collection"}]
+            route["merchant_credit"] = min((int(node["progress"]) for node in credit_nodes), default=60)
+            route["blocked_nodes"] = sum(1 for node in nodes if int(node["risk"]) >= 55)
         clocks = self.db.rows("SELECT * FROM faction_clocks ORDER BY value DESC, rowid")
         diplomacy = self.db.row("SELECT * FROM diplomacy_state WHERE id = 1") or {}
         guidance = self._build_guidance(game, metrics, siege, events, directives, cases, routes, clocks)
@@ -902,6 +914,7 @@ class GameSession:
                     "jianghuai_grain_to_bianjing",
                     {"risk": stage + 1, "corruption": stage, "eta": 1 if stage >= 3 else 0},
                 )
+                self.db.change_route_node("bian_river_convoy", {"risk": stage + 2, "progress": -stage, "status": "转运迟滞"})
                 if stage >= 2:
                     metric_deltas["京城粮"] = metric_deltas.get("京城粮", 0) - 1
                     timeline.append("转运财税网络开始怠工，江淮粮船报称水程、账册皆有阻滞。")
@@ -926,6 +939,7 @@ class GameSession:
                     )
             elif clock_id == "western_army_grievance":
                 self.db.change_route("shaanxi_relief_army", {"risk": stage + 2, "eta": 1 if stage >= 3 else 0, "current_load": -1})
+                self.db.change_route_node("hezhong_crossing", {"risk": stage + 3, "progress": -stage, "status": "西军观望"})
                 if stage >= 2:
                     siege_deltas["qinwang_response"] = siege_deltas.get("qinwang_response", 0) - 3
                     timeline.append("陕西西军因赏格未实而观望，勤王路线又迟一线。")
@@ -946,6 +960,7 @@ class GameSession:
                     warnings.append("罢李纲风波已成案，守城体系可能被朝争摇动。")
             elif clock_id == "grain_market_strike":
                 if stage >= 2:
+                    self.db.change_route_node("capital_grain_market", {"risk": stage + 4, "progress": -stage, "status": "粮行观望"})
                     siege_deltas["grain_price"] = siege_deltas.get("grain_price", 0) + 7
                     metric_deltas["民心"] = metric_deltas.get("民心", 0) - 1
                     timeline.append("粮行观望闭市，坊市米价再起波澜。")
@@ -953,28 +968,54 @@ class GameSession:
                     warnings.append("粮行罢市会推高粮价，需保价、护商并限价平粜。")
         return warnings
 
-    def route_action(self, route_id: str, action: str = "escort") -> dict[str, Any]:
+    def route_action(self, route_id: str, action: str = "escort", node_id: str | None = None) -> dict[str, Any]:
         route = self.db.row("SELECT * FROM logistics_routes WHERE id = ?", (route_id,))
         if not route:
             raise KeyError("未找到此路线。")
+        selected_node = None
+        if node_id:
+            selected_node = self.db.row("SELECT * FROM route_nodes WHERE id = ? AND route_id = ?", (node_id, route_id))
+            if not selected_node:
+                raise KeyError("未找到此路线节点。")
         game = self.db.row("SELECT * FROM game_state WHERE id = 1") or {"turn": 1}
         turn = int(game.get("turn", 1))
         action = action or "escort"
         with self.db.conn:
+            route_nodes = self.db.rows("SELECT * FROM route_nodes WHERE route_id = ? ORDER BY risk DESC, rowid", (route_id,))
+            updated_node: dict[str, Any] | None = None
+
+            def pick_node(kinds: set[str] | None = None) -> dict[str, Any] | None:
+                if selected_node:
+                    return selected_node
+                if kinds:
+                    return next((node for node in route_nodes if node["kind"] in kinds), None)
+                return route_nodes[0] if route_nodes else None
+
+            def change_node(changes: dict[str, int | str], kinds: set[str] | None = None) -> dict[str, Any] | None:
+                nonlocal updated_node
+                node = pick_node(kinds)
+                if not node:
+                    return None
+                updated_node = self.db.change_route_node(node["id"], changes)
+                return updated_node
+
             if action == "escort":
                 self._record_ledger(turn, "国库", -2, "路线行动", f"派兵护送{route['name']}", "战区路线")
                 updated = self.db.change_route(route_id, {"risk": -8, "escort": 14, "status": "护送"})
+                change_node({"risk": -8, "progress": 8, "status": "护送中"})
                 if route_id == "jianghuai_grain_to_bianjing":
                     self.db.change_siege("grain_price", -4, high=300)
                     self.db.change_faction_clock("grain_market_strike", -4)
                 result = "已派兵护送，路线风险下降，但国库添了一笔护送开销。"
             elif action == "audit":
                 updated = self.db.change_route(route_id, {"risk": 2, "corruption": -10, "status": "查账"})
+                change_node({"risk": 3, "progress": 7, "status": "清查账册"}, {"warehouse", "collection", "river"})
                 self.db.change_faction_clock("transport_slowdown", 8)
                 result = "已点名查账，截留会收敛，转运网络也会记下这笔账。"
             elif action == "subsidy":
                 self._record_ledger(turn, "国库", -4, "路线行动", f"给付{route['name']}脚价与保价", "战区路线")
                 updated = self.db.change_route(route_id, {"risk": -5, "corruption": -4, "current_load": 6, "status": "保价催运"})
+                change_node({"risk": -7, "progress": 14, "status": "保价开动"}, {"market", "warehouse", "collection"})
                 self.db.change_faction_clock("grain_market_strike", -8)
                 self.db.change_faction_clock("transport_slowdown", -4)
                 self.db.change_siege("grain_price", -6, high=300)
@@ -982,12 +1023,14 @@ class GameSession:
             elif action == "reroute":
                 self._record_ledger(turn, "国库", -1, "路线行动", f"{route['name']}临时改道", "战区路线")
                 updated = self.db.change_route(route_id, {"risk": -10, "eta": 1, "current_load": -1, "status": "改道"})
+                change_node({"risk": -10, "progress": -3, "status": "绕行避险"})
                 result = "路线改道避开最险节点，但到达时间会被拉长。"
             elif action == "reward":
                 if route_id != "shaanxi_relief_army":
                     raise ValueError("加赏催援只适用于勤王路线。")
                 self._record_ledger(turn, "国库", -5, "勤王赏格", "兑现西军入援赏格", "战区路线")
                 updated = self.db.change_route(route_id, {"risk": -6, "eta": -1, "current_load": 10, "escort": 6, "status": "加赏集结"})
+                change_node({"risk": -6, "progress": 12, "status": "赏格已明"}, {"intercept", "relay"})
                 self.db.change_siege("qinwang_response", 8)
                 self.db.change_issue("qinwang_call", 8)
                 self.db.change_faction_clock("western_army_grievance", -12)
@@ -997,10 +1040,54 @@ class GameSession:
                     raise ValueError("遣使催促只适用于勤王路线。")
                 self._record_ledger(turn, "国库", -1, "勤王使费", "遣中使催促西军行营", "战区路线")
                 updated = self.db.change_route(route_id, {"risk": -3, "eta": -1, "status": "中使催促"})
+                change_node({"risk": -4, "progress": 8, "status": "中使抵达"}, {"intercept", "relay"})
                 self.db.change_siege("qinwang_response", 4)
                 self.db.change_issue("qinwang_call", 4)
                 self.db.change_faction_clock("western_army_grievance", -5)
                 result = "中使持诏催促，勤王路线略有提速。"
+            elif action == "secure_node":
+                self._record_ledger(turn, "国库", -2, "节点固护", f"固护{route['name']}关键节点", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -6, "escort": 8, "status": "节点固护"})
+                node = change_node({"risk": -12, "progress": 10, "status": "已固护"})
+                if route_id == "shaanxi_relief_army":
+                    self.db.change_siege("qinwang_response", 2)
+                result = f"已固护{node['name'] if node else route['name']}，局部风险下降，路线更可追溯。"
+            elif action == "clear_intercept":
+                if route_id != "shaanxi_relief_army":
+                    raise ValueError("清截击只适用于勤王路线。")
+                self._record_ledger(turn, "国库", -3, "勤王接应", "派兵清理勤王路截击点", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -10, "eta": -1, "current_load": 6, "status": "清截击"})
+                node = change_node({"risk": -16, "progress": 16, "status": "截击已清"}, {"intercept", "relay"})
+                self.db.change_siege("qinwang_response", 6)
+                self.db.change_issue("qinwang_call", 5)
+                self.db.change_faction_clock("western_army_grievance", -10)
+                result = f"{node['name'] if node else '勤王路'}截击稍解，西军入援更可信。"
+            elif action == "receive":
+                self._record_ledger(turn, "国库", -2, "路线接应", f"为{route['name']}安排接应", "战区路线")
+                if route_id == "shaanxi_relief_army":
+                    updated = self.db.change_route(route_id, {"risk": -7, "eta": -1, "current_load": 8, "status": "接应入援"})
+                    node = change_node({"risk": -8, "progress": 18, "status": "接应已定"}, {"arrival", "relay"})
+                    self.db.change_siege("qinwang_response", 5)
+                    self.db.change_siege("defender_will", 2)
+                    result = f"{node['name'] if node else '勤王接应'}已有章程，守军听闻援兵将近。"
+                else:
+                    updated = self.db.change_route(route_id, {"risk": -5, "eta": -1, "current_load": 8, "status": "接粮入仓"})
+                    node = change_node({"risk": -7, "progress": 18, "status": "接粮入仓"}, {"market", "collection", "warehouse"})
+                    self.db.change_metric("京城粮", 6)
+                    self.db.change_metric("民心", 1)
+                    self.db.change_siege("grain_price", -5, high=300)
+                    result = f"{node['name'] if node else '粮道'}已有接收仓口，京城粮储回升。"
+            elif action == "restore_credit":
+                if route_id == "shaanxi_relief_army":
+                    raise ValueError("恢复商户信用只适用于粮运路线。")
+                self._record_ledger(turn, "国库", -3, "商户信用", "给付脚价并保护正常粮商", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -4, "corruption": -6, "status": "恢复信用"})
+                node = change_node({"risk": -8, "progress": 18, "status": "信用回升"}, {"market", "collection", "warehouse"})
+                self.db.change_metric("民心", 2)
+                self.db.change_siege("grain_price", -8, high=300)
+                self.db.change_faction_clock("grain_market_strike", -10)
+                self.db.change_faction_clock("transport_slowdown", -4)
+                result = f"{node['name'] if node else '粮运节点'}信用稍复，粮商愿意明面交易。"
             else:
                 raise ValueError("未知路线行动。")
             self.db.conn.execute(
@@ -1020,7 +1107,7 @@ class GameSession:
                     json.dumps(["路线行动", route["name"]], ensure_ascii=False),
                 ),
             )
-        return {"route": updated, "result": result, "state": self.state()}
+        return {"route": updated, "node": updated_node, "result": result, "state": self.state()}
 
     def mitigate_faction_clock(self, clock_id: str, action: str = "appease") -> dict[str, Any]:
         clock = self.db.row("SELECT * FROM faction_clocks WHERE id = ?", (clock_id,))
@@ -1032,16 +1119,20 @@ class GameSession:
             if clock_id == "transport_slowdown":
                 self._record_ledger(turn, "国库", -3, "派系缓和", "给付转运脚价并核关键节点", "人物谱")
                 self.db.change_route("jianghuai_grain_to_bianjing", {"risk": -4, "corruption": -2, "status": "缓和转运"})
+                self.db.change_route_node("bian_river_convoy", {"risk": -7, "progress": 8, "status": "缓和转运"})
                 next_clock = self.db.change_faction_clock(clock_id, -12)
                 result = "脚价与问责并行，转运怠工暂被压住。"
             elif clock_id == "western_army_grievance":
                 self._record_ledger(turn, "国库", -4, "派系缓和", "预支西军赏格与军粮承诺", "人物谱")
                 self.db.change_route("shaanxi_relief_army", {"eta": -1, "current_load": 4, "status": "安抚西军"})
+                self.db.change_route_node("hezhong_crossing", {"risk": -8, "progress": 10, "status": "西军愿动"})
+                self.db.change_route_node("hedong_relay", {"risk": -5, "progress": 8, "status": "接应有诺"})
                 self.db.change_siege("qinwang_response", 5)
                 next_clock = self.db.change_faction_clock(clock_id, -12)
                 result = "赏格先落一半，西军怨望回落。"
             elif clock_id == "grain_market_strike":
                 self._record_ledger(turn, "国库", -2, "派系缓和", "保价收粮并护正常商户", "人物谱")
+                self.db.change_route_node("capital_grain_market", {"risk": -9, "progress": 12, "status": "开市有信"})
                 self.db.change_siege("grain_price", -8, high=300)
                 next_clock = self.db.change_faction_clock(clock_id, -10)
                 result = "保价和护商令粮行愿意开市，粮价压力下降。"
@@ -1263,6 +1354,8 @@ class GameSession:
                     siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) - 2
                     self.db.change_issue("qinwang_call", 18)
                     self.db.change_route("shaanxi_relief_army", {"status": "集结", "eta": -1, "escort": 8, "current_load": 12})
+                    self.db.change_route_node("hezhong_crossing", {"risk": -8, "progress": 14, "status": "西军渡河"})
+                    self.db.change_route_node("hedong_relay", {"risk": -5, "progress": 10, "status": "接应待粮"})
                     self.db.change_faction_clock("western_army_grievance", -9)
                     result = "手诏传至陕西，种师道部开始集结；但赏格和军粮仍须兑现，否则行军会迟。"
                     timeline.append("西军由观望转入集结，勤王响应上升。")
@@ -1272,6 +1365,8 @@ class GameSession:
                     siege_deltas["grain_price"] = siege_deltas.get("grain_price", 0) - 22
                     siege_deltas["defender_will"] = siege_deltas.get("defender_will", 0) + 3
                     self.db.change_route("jianghuai_grain_to_bianjing", {"risk": -5, "current_load": 4, "status": "催运"})
+                    self.db.change_route_node("capital_grain_market", {"risk": -9, "progress": 12, "status": "开市平粜"})
+                    self.db.change_route_node("bian_river_convoy", {"risk": -4, "progress": 8, "status": "催船北上"})
                     self.db.change_faction_clock("grain_market_strike", 6)
                     self.db.change_faction_clock("transport_slowdown", 4)
                     result = "开封府开仓平粜，米价暂缓；江淮粮道被催，但转运网络索要护粮与脚价。"
@@ -1292,10 +1387,13 @@ class GameSession:
             self._complete_secret_orders(turn, timeline)
             if not any("勤王" in item["title"] or "西军" in item["title"] for item in directives):
                 self.db.change_route("shaanxi_relief_army", {"eta": 1, "risk": 4})
+                self.db.change_route_node("hezhong_crossing", {"risk": 5, "progress": -4, "status": "无人接应"})
                 self.db.change_issue("qinwang_call", -4)
                 self.db.change_faction_clock("western_army_grievance", 5)
             if not any("粮" in item["title"] or "平粜" in item["title"] or "开仓" in item["title"] for item in directives):
                 self.db.change_route("jianghuai_grain_to_bianjing", {"risk": 3, "corruption": 2, "eta": 1})
+                self.db.change_route_node("capital_grain_market", {"risk": 5, "progress": -5, "status": "粮行闭市"})
+                self.db.change_route_node("bian_river_convoy", {"risk": 3, "progress": -3, "status": "水程迟滞"})
                 self.db.change_faction_clock("transport_slowdown", 3)
                 self.db.change_faction_clock("grain_market_strike", 4)
             clock_warnings = self._apply_faction_clocks(metric_deltas, siege_deltas, timeline)

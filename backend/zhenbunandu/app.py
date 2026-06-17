@@ -66,6 +66,7 @@ class DebateRequest(BaseModel):
 
 class RouteActionRequest(BaseModel):
     action: str = "escort"
+    node_id: Optional[str] = None
 
 
 class ClockMitigationRequest(BaseModel):
@@ -189,7 +190,7 @@ def court_case_judgment(case_id: str, request: JudgmentRequest) -> dict[str, Any
 @app.post("/api/routes/{route_id}/action")
 def logistics_route_action(route_id: str, request: RouteActionRequest) -> dict[str, Any]:
     try:
-        return session.route_action(route_id, request.action)
+        return session.route_action(route_id, request.action, request.node_id)
     except Exception as exc:
         raise api_error(exc) from exc
 

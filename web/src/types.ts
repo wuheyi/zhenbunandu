@@ -172,6 +172,26 @@ export type LogisticsRoute = {
   status: string;
   eta: number;
   current_load: number;
+  nodes: RouteNode[];
+  merchant_credit: number;
+  blocked_nodes: number;
+};
+
+export type RouteNode = {
+  id: string;
+  route_id: string;
+  name: string;
+  kind: string;
+  stage: string;
+  risk: number;
+  progress: number;
+  controller: string;
+  status: string;
+  effect: string;
+  action_hint: string;
+  x: number;
+  y: number;
+  last_delta: number;
 };
 
 export type Directive = {

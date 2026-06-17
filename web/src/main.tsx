@@ -17,7 +17,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { Army, CourtCase, Directive, DiplomacyOption, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region } from "./types";
+import type { Army, CourtCase, Directive, DiplomacyOption, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
 import "./styles.css";
 
 type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater" | "diplomacy";
@@ -140,13 +140,13 @@ function App() {
     setSelectedNode(focus.node);
   }, []);
 
-  const handleRouteAction = async (routeId: string, action: string) => {
+  const handleRouteAction = async (routeId: string, action: string, nodeId?: string) => {
     setBusy("路线处置中...");
     setError("");
     try {
       const data = await api<{ state: GameState }>(`/api/routes/${encodeURIComponent(routeId)}/action`, {
         method: "POST",
-        body: JSON.stringify({ action })
+        body: JSON.stringify({ action, node_id: nodeId })
       });
       setState(data.state);
     } catch (err: any) {
@@ -1354,7 +1354,7 @@ function TheaterModal({
 }: {
   state: GameState;
   busy: string;
-  onRouteAction: (routeId: string, action: string) => Promise<void>;
+  onRouteAction: (routeId: string, action: string, nodeId?: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [tab, setTab] = React.useState<"regions" | "armies" | "gates" | "routes">("regions");
@@ -1441,20 +1441,25 @@ function RouteDetailCard({
 }: {
   route: LogisticsRoute;
   busy: string;
-  onAction: (routeId: string, action: string) => Promise<void>;
+  onAction: (routeId: string, action: string, nodeId?: string) => Promise<void>;
 }) {
   const commonActions = [
     ["escort", "护送"],
     ["audit", "查账"],
     ["subsidy", "保价"],
-    ["reroute", "改道"]
+    ["reroute", "改道"],
+    ["restore_credit", "恢复信用"],
+    ["receive", "接粮入仓"]
   ];
   const reliefActions = [
     ["reward", "加赏"],
     ["envoy", "遣使"],
-    ["reroute", "改道"]
+    ["reroute", "改道"],
+    ["clear_intercept", "清截击"],
+    ["receive", "调粮接应"]
   ];
   const actions = route.id === "shaanxi_relief_army" ? reliefActions : commonActions;
+  const worstNode = [...(route.nodes || [])].sort((a, b) => b.risk - a.risk)[0];
   return (
     <article className="detail-card">
       <h3>{route.name}</h3>
@@ -1463,12 +1468,56 @@ function RouteDetailCard({
       <MetricLine label="风险" value={route.risk} dangerHigh />
       <MetricLine label="截留" value={route.corruption} dangerHigh />
       <MetricLine label="护送" value={route.escort} />
+      <MetricLine label={route.id === "shaanxi_relief_army" ? "接应可信" : "商户信用"} value={route.merchant_credit ?? 60} />
+      <p className="route-node-summary">
+        {route.blocked_nodes ? `${route.blocked_nodes} 个节点受阻` : "节点暂未受阻"}
+        {worstNode ? ` · 最险：${worstNode.name} ${worstNode.risk}` : ""}
+      </p>
+      <div className="route-node-list">
+        {(route.nodes || []).map((node) => (
+          <RouteNodeRow key={node.id} route={route} node={node} busy={busy} onAction={onAction} />
+        ))}
+      </div>
       <div className="route-actions">
         {actions.map(([action, label]) => (
           <button key={action} disabled={!!busy} onClick={() => onAction(route.id, action)}>{label}</button>
         ))}
       </div>
     </article>
+  );
+}
+
+function RouteNodeRow({
+  route,
+  node,
+  busy,
+  onAction
+}: {
+  route: LogisticsRoute;
+  node: RouteNode;
+  busy: string;
+  onAction: (routeId: string, action: string, nodeId?: string) => Promise<void>;
+}) {
+  const isRelief = route.id === "shaanxi_relief_army";
+  const nodeAction = isRelief
+    ? node.kind === "intercept" ? "clear_intercept" : "receive"
+    : node.kind === "market" || node.kind === "collection" ? "restore_credit" : "secure_node";
+  const actionLabel = isRelief
+    ? node.kind === "intercept" ? "清截击" : "接应"
+    : node.kind === "market" || node.kind === "collection" ? "恢复信用" : "固护";
+  return (
+    <div className="route-node-row">
+      <div>
+        <b>{node.name}</b>
+        <small>{node.stage} · {node.status} · {node.controller}</small>
+        <span>{node.effect}</span>
+      </div>
+      <div className="route-node-meters">
+        <span className={node.risk >= 55 ? "danger-text" : ""}>险 {node.risk}</span>
+        <span>进 {node.progress}</span>
+      </div>
+      <button disabled={!!busy} onClick={() => onAction(route.id, nodeAction, node.id)}>{actionLabel}</button>
+    </div>
   );
 }
 

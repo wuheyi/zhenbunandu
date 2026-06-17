@@ -156,6 +156,23 @@ class GameDB:
                 current_load INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS route_nodes (
+                id TEXT PRIMARY KEY,
+                route_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                risk INTEGER NOT NULL,
+                progress INTEGER NOT NULL,
+                controller TEXT NOT NULL,
+                status TEXT NOT NULL,
+                effect TEXT NOT NULL,
+                action_hint TEXT NOT NULL,
+                x REAL NOT NULL,
+                y REAL NOT NULL,
+                last_delta INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS city_gates (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -346,6 +363,7 @@ class GameDB:
             "economy_ledger",
             "memories",
             "logistics_routes",
+            "route_nodes",
             "diplomacy_state",
         ]
         with self.conn:
@@ -381,6 +399,7 @@ class GameDB:
                        VALUES (:id, :name, :origin, :destination, :capacity, :risk, :delay, :controller, :corruption, :escort, :status, :eta, :current_load)""",
                     item,
                 )
+            self.seed_route_nodes(content.route_nodes)
             gates = [
                 ("xuanhua_gate", "宣化门", 47, 3000, "待命", 42, 36, 56, 48, "危"),
                 ("chenzhou_gate", "陈州门", 52, 2200, "殿前司", 34, 44, 60, 62, "稳"),
@@ -506,6 +525,35 @@ class GameDB:
             parts = ", ".join(f"{field} = ?" for field in next_values)
             self.conn.execute(f"UPDATE logistics_routes SET {parts} WHERE id = ?", [*next_values.values(), route_id])
         return self.row("SELECT * FROM logistics_routes WHERE id = ?", (route_id,))
+
+    def seed_route_nodes(self, route_nodes: list[dict[str, Any]]) -> None:
+        with self.conn:
+            for node in route_nodes:
+                self.conn.execute(
+                    """INSERT INTO route_nodes
+                       (id, route_id, name, kind, stage, risk, progress, controller, status, effect, action_hint, x, y)
+                       VALUES (:id, :route_id, :name, :kind, :stage, :risk, :progress, :controller, :status, :effect, :action_hint, :x, :y)
+                       ON CONFLICT(id) DO NOTHING""",
+                    node,
+                )
+
+    def change_route_node(self, node_id: str, changes: dict[str, int | str]) -> dict[str, Any] | None:
+        node = self.row("SELECT * FROM route_nodes WHERE id = ?", (node_id,))
+        if not node:
+            return None
+        next_values: dict[str, int | str] = {}
+        for key, delta in changes.items():
+            if isinstance(delta, int) and key in {"risk", "progress"}:
+                current = int(node[key])
+                next_values[key] = clamp(current + delta, 0, 100)
+                if key == "progress":
+                    next_values["last_delta"] = int(next_values[key]) - current
+            else:
+                next_values[key] = delta
+        if next_values:
+            parts = ", ".join(f"{field} = ?" for field in next_values)
+            self.conn.execute(f"UPDATE route_nodes SET {parts} WHERE id = ?", [*next_values.values(), node_id])
+        return self.row("SELECT * FROM route_nodes WHERE id = ?", (node_id,))
 
     def change_issue(self, issue_id: str, delta: int) -> int:
         row = self.row("SELECT value FROM issues WHERE id = ?", (issue_id,))

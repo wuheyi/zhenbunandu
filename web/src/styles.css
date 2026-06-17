@@ -1398,6 +1398,61 @@ input {
   background: rgba(255, 248, 232, .95);
 }
 
+.route-node-summary {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.route-node-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.route-node-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px;
+  background: rgba(216, 196, 154, .18);
+  border: 1px solid rgba(58, 48, 38, .14);
+}
+
+.route-node-row b,
+.route-node-row small,
+.route-node-row span {
+  display: block;
+}
+
+.route-node-row b {
+  font-size: 14px;
+}
+
+.route-node-row small,
+.route-node-row span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.route-node-meters {
+  min-width: 58px;
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+
+.route-node-row button {
+  min-height: 32px;
+  padding: 5px 9px;
+  color: var(--ink);
+  background: rgba(255, 248, 232, .82);
+  border: 1px solid rgba(58, 48, 38, .2);
+  white-space: nowrap;
+}
+
 .resource-ledger {
   display: grid;
   align-content: start;

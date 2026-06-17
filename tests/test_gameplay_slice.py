@@ -30,6 +30,7 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert len(state["events"]) >= 3
     assert any(minister["id"] == "li_gang" for minister in state["ministers"])
     assert len(state["logistics_routes"]) == 3
+    assert any(node["id"] == "capital_grain_market" for route in state["logistics_routes"] for node in route["nodes"])
     assert len(state["faction_clocks"]) >= 5
     assert {option["action"] for option in state["diplomacy_options"]} >= {"stall", "tribute", "hardline", "divide"}
     assert state["diplomacy"]["status"] == "未接触"
@@ -97,6 +98,35 @@ def test_route_actions_and_faction_clocks_update_state(tmp_path: Path) -> None:
     assert after_clock["value"] < before_clock["value"]
 
 
+def test_route_node_actions_update_nodes_and_route(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    before = game.state()
+    shaanxi = next(route for route in before["logistics_routes"] if route["id"] == "shaanxi_relief_army")
+    crossing = next(node for node in shaanxi["nodes"] if node["id"] == "hezhong_crossing")
+
+    cleared = game.route_action("shaanxi_relief_army", "clear_intercept", "hezhong_crossing")["state"]
+    after_route = next(route for route in cleared["logistics_routes"] if route["id"] == "shaanxi_relief_army")
+    after_crossing = next(node for node in after_route["nodes"] if node["id"] == "hezhong_crossing")
+    assert after_route["eta"] < shaanxi["eta"]
+    assert after_crossing["risk"] < crossing["risk"]
+    assert after_crossing["progress"] > crossing["progress"]
+    assert cleared["siege"]["qinwang_response"] > before["siege"]["qinwang_response"]
+
+
+def test_grain_credit_action_lowers_grain_price_and_recovers_market(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    before = game.state()
+    grain_route = next(route for route in before["logistics_routes"] if route["id"] == "jianghuai_grain_to_bianjing")
+    market = next(node for node in grain_route["nodes"] if node["id"] == "capital_grain_market")
+
+    restored = game.route_action("jianghuai_grain_to_bianjing", "restore_credit", "capital_grain_market")["state"]
+    after_route = next(route for route in restored["logistics_routes"] if route["id"] == "jianghuai_grain_to_bianjing")
+    after_market = next(node for node in after_route["nodes"] if node["id"] == "capital_grain_market")
+    assert after_market["risk"] < market["risk"]
+    assert after_market["progress"] > market["progress"]
+    assert restored["siege"]["grain_price"] < before["siege"]["grain_price"]
+
+
 def test_diplomacy_actions_update_pressure_and_records(tmp_path: Path) -> None:
     game = make_session(tmp_path)
     before = game.state()
@@ -144,9 +174,12 @@ def test_api_court_debate_endpoint() -> None:
 def test_api_route_action_and_clock_mitigation_endpoints() -> None:
     api_session.new_game()
     client = TestClient(app)
-    route_response = client.post("/api/routes/jianghuai_grain_to_bianjing/action", json={"action": "subsidy"})
+    route_response = client.post(
+        "/api/routes/jianghuai_grain_to_bianjing/action",
+        json={"action": "restore_credit", "node_id": "capital_grain_market"},
+    )
     assert route_response.status_code == 200
-    assert route_response.json()["state"]["logistics_routes"][0]["status"] == "保价催运"
+    assert route_response.json()["state"]["logistics_routes"][0]["status"] == "恢复信用"
     clock_response = client.post("/api/faction_clocks/grain_market_strike/mitigate", json={"action": "appease"})
     assert clock_response.status_code == 200
     assert next(clock for clock in clock_response.json()["state"]["faction_clocks"] if clock["id"] == "grain_market_strike")["value"] <= 4

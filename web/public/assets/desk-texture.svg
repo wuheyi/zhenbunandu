@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="御案纹理">
+  <defs>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2d2117"/>
+      <stop offset=".55" stop-color="#5b3b25"/>
+      <stop offset="1" stop-color="#1e1712"/>
+    </linearGradient>
+    <radialGradient id="paper" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#fff8e8"/>
+      <stop offset=".85" stop-color="#d8c49a"/>
+      <stop offset="1" stop-color="#9b734d"/>
+    </radialGradient>
+    <filter id="noise">
+      <feTurbulence baseFrequency=".03" numOctaves="3" seed="7"/>
+      <feColorMatrix type="saturate" values=".2"/>
+      <feBlend mode="overlay" in2="SourceGraphic"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#wood)"/>
+  <rect width="1600" height="900" fill="#6a4328" opacity=".24" filter="url(#noise)"/>
+  <rect x="110" y="76" width="1380" height="740" rx="10" fill="url(#paper)" opacity=".88"/>
+  <rect x="153" y="118" width="1294" height="656" fill="none" stroke="#856b46" stroke-width="4" opacity=".42"/>
+  <g opacity=".24" stroke="#5f655d" stroke-width="2">
+    <path d="M280 142 v594 M362 142 v594 M444 142 v594 M526 142 v594 M608 142 v594 M690 142 v594 M772 142 v594 M854 142 v594 M936 142 v594 M1018 142 v594 M1100 142 v594 M1182 142 v594 M1264 142 v594"/>
+  </g>
+  <g fill="#a7342b" opacity=".22">
+    <circle cx="218" cy="172" r="58"/>
+    <circle cx="1232" cy="184" r="64"/>
+    <rect x="206" y="680" width="118" height="86" rx="8"/>
+  </g>
+  <g stroke="#c4a56f" stroke-width="5" fill="none" opacity=".52">
+    <path d="M37 58 C136 20 216 21 310 57"/>
+    <path d="M1289 57 C1383 18 1466 22 1560 58"/>
+    <path d="M39 840 C140 875 232 875 330 840"/>
+    <path d="M1272 840 C1382 879 1464 873 1561 840"/>
+  </g>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="朱印">
+  <filter id="rough">
+    <feTurbulence baseFrequency=".055" numOctaves="3" seed="11"/>
+    <feDisplacementMap in="SourceGraphic" scale="5"/>
+  </filter>
+  <rect x="28" y="28" width="184" height="184" rx="12" fill="#a7342b" opacity=".95" filter="url(#rough)"/>
+  <rect x="48" y="48" width="144" height="144" rx="8" fill="none" stroke="#fff1d0" stroke-width="10" opacity=".55"/>
+  <path d="M76 83 H164 M76 120 H164 M76 157 H164 M96 78 V164 M142 78 V164" stroke="#fff1d0" stroke-width="12" stroke-linecap="round" opacity=".62"/>
+</svg>

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "palace_guards",
+    "name": "殿前司禁军",
+    "commander": "禁军都虞候",
+    "location": "汴京",
+    "manpower": 26000,
+    "morale": 42,
+    "training": 38,
+    "equipment": 44,
+    "supply": 48,
+    "arrears": 72,
+    "loyalty": 51,
+    "mobility": 34,
+    "stance": "守城观望"
+  },
+  {
+    "id": "li_gang_militia",
+    "name": "京城民壮",
+    "commander": "开封府尹",
+    "location": "汴京",
+    "manpower": 8000,
+    "morale": 46,
+    "training": 22,
+    "equipment": 27,
+    "supply": 44,
+    "arrears": 0,
+    "loyalty": 58,
+    "mobility": 25,
+    "stance": "待编练"
+  },
+  {
+    "id": "western_army",
+    "name": "西军",
+    "commander": "种师道",
+    "location": "陕西路",
+    "manpower": 32000,
+    "morale": 68,
+    "training": 72,
+    "equipment": 66,
+    "supply": 52,
+    "arrears": 35,
+    "loyalty": 61,
+    "mobility": 46,
+    "stance": "观望待诏"
+  },
+  {
+    "id": "jin_east_army",
+    "name": "金军东路",
+    "commander": "完颜宗望",
+    "location": "河北东路",
+    "manpower": 45000,
+    "morale": 78,
+    "training": 80,
+    "equipment": 74,
+    "supply": 65,
+    "arrears": 0,
+    "loyalty": 76,
+    "mobility": 82,
+    "stance": "南下"
+  }
+]

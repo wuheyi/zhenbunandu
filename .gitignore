@@ -1,0 +1,9 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+data/*.db
+web/node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo

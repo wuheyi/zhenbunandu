@@ -1,0 +1,54 @@
+[
+  {
+    "id": "turn2_jin_envoy",
+    "turn": 2,
+    "title": "金使索约",
+    "kind": "外交",
+    "summary": "金使称可暂缓攻城，但索金银、质子与罢主战大臣，朝中主和之声骤起。",
+    "urgency": 86,
+    "severity": 82,
+    "credibility": 78,
+    "interests": ["金军", "主和宰执", "宗室内廷"],
+    "audiences": ["主和宰执", "李纲", "金使"],
+    "actions": ["开朝议", "遣使拖延", "拒绝割地"]
+  },
+  {
+    "id": "turn2_qinwang_silent",
+    "turn": 2,
+    "title": "勤王诏迟疑",
+    "kind": "军报",
+    "summary": "陕西与河东诸军称道路险阻、赏格未明，愿候朝廷明诏与粮草接应。",
+    "urgency": 78,
+    "severity": 74,
+    "credibility": 75,
+    "interests": ["西军边臣", "河东", "勤王"],
+    "audiences": ["主和宰执", "户部尚书", "李纲"],
+    "actions": ["发勤王诏", "定赏格", "拨粮接应"]
+  },
+  {
+    "id": "turn3_grain_price",
+    "turn": 3,
+    "title": "京城粮价腾贵",
+    "kind": "民政",
+    "summary": "坊市米价再涨，太学生已有聚议，主和派借民困劝陛下早许和约。",
+    "urgency": 80,
+    "severity": 76,
+    "credibility": 82,
+    "interests": ["京城士民", "商户粮行", "主和宰执"],
+    "audiences": ["开封府尹", "户部尚书", "主和宰执"],
+    "actions": ["开仓平粜", "查办囤积", "催江淮粮道"]
+  },
+  {
+    "id": "turn4_li_gang_impeached",
+    "turn": 4,
+    "title": "罢李纲风波",
+    "kind": "朝政",
+    "summary": "宰执言李纲专权扰民，宗室内廷亦惧金军迁怒，请收其兵权以便议和。",
+    "urgency": 84,
+    "severity": 86,
+    "credibility": 70,
+    "interests": ["李纲", "主和宰执", "宗室内廷"],
+    "audiences": ["李纲", "主和宰执", "开封府尹"],
+    "actions": ["开朝议", "保李纲", "折中授权"]
+  }
+]

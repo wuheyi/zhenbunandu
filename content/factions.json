@@ -1,0 +1,62 @@
+[
+  {
+    "id": "war_party",
+    "name": "主战清议",
+    "influence": 58,
+    "affinity": 62,
+    "damage": 0,
+    "backlash": 22,
+    "fear": 12,
+    "summary": "支持守城拒割地，能提升民意和君威，也会逼迫朝廷冒险。"
+  },
+  {
+    "id": "peace_party",
+    "name": "主和宰执",
+    "influence": 66,
+    "affinity": 38,
+    "damage": 0,
+    "backlash": 36,
+    "fear": 8,
+    "summary": "以保宗庙为名推动议和，能买时间，也可能滑向屈辱和降议。"
+  },
+  {
+    "id": "transport_tax_network",
+    "name": "转运财税网络",
+    "influence": 71,
+    "affinity": 35,
+    "damage": 0,
+    "backlash": 42,
+    "fear": 14,
+    "summary": "控制粮运与军饷细账，是官僚执行链上最会拖延的一层。"
+  },
+  {
+    "id": "old_party_clients",
+    "name": "旧党门生",
+    "influence": 54,
+    "affinity": 31,
+    "damage": 0,
+    "backlash": 33,
+    "fear": 10,
+    "summary": "遮掩旧账、互保人情，短期可以被震慑，长期会抱团。"
+  },
+  {
+    "id": "capital_people",
+    "name": "京城士民",
+    "influence": 62,
+    "affinity": 52,
+    "damage": 0,
+    "backlash": 24,
+    "fear": 4,
+    "summary": "要粮价稳定，也要朝廷有守城信心；民心崩则降议易起。"
+  },
+  {
+    "id": "inner_court",
+    "name": "宗室内廷",
+    "influence": 49,
+    "affinity": 44,
+    "damage": 0,
+    "backlash": 28,
+    "fear": 6,
+    "summary": "关心宫中安全和内帑，金军越近越倾向南迁或质子。"
+  }
+]

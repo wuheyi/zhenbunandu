@@ -1,0 +1,50 @@
+[
+  {
+    "id": "defend_bianjing",
+    "title": "保卫汴京",
+    "value": -18,
+    "assignee": "待定",
+    "status": "active",
+    "summary": "-100 为城防崩溃，+100 为守备成势。"
+  },
+  {
+    "id": "discipline_guards",
+    "title": "整肃禁军",
+    "value": -34,
+    "assignee": "殿前司",
+    "status": "active",
+    "summary": "欠饷、军纪、士气共同决定禁军是否可战。"
+  },
+  {
+    "id": "investigate_pay",
+    "title": "追查军饷",
+    "value": -42,
+    "assignee": "皇城司",
+    "status": "active",
+    "summary": "证据链越完整，殿前对质越能形成清算爽点。"
+  },
+  {
+    "id": "qinwang_call",
+    "title": "催发勤王",
+    "value": -55,
+    "assignee": "中书门下",
+    "status": "active",
+    "summary": "地方是否相信汴京能守，是勤王能否成行的关键。"
+  },
+  {
+    "id": "hedong_barrier",
+    "title": "河东屏障",
+    "value": -28,
+    "assignee": "边臣",
+    "status": "active",
+    "summary": "河东守住，金军威压下降；河东失守，汴京压力加速。"
+  },
+  {
+    "id": "peace_coup",
+    "title": "主和逼宫",
+    "value": -22,
+    "assignee": "宰执",
+    "status": "active",
+    "summary": "值越低，屈辱和议与南迁压力越强。"
+  }
+]

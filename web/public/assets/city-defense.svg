@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="汴京城防底图">
+  <defs>
+    <radialGradient id="silk" cx="50%" cy="48%" r="78%">
+      <stop offset="0" stop-color="#fff6dc"/>
+      <stop offset=".72" stop-color="#ead6a8"/>
+      <stop offset="1" stop-color="#c6aa79"/>
+    </radialGradient>
+    <filter id="grain">
+      <feTurbulence baseFrequency=".018" numOctaves="3" seed="42"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feBlend mode="multiply" in2="SourceGraphic"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#silk)"/>
+  <rect width="1600" height="900" fill="#e9d7ad" opacity=".22" filter="url(#grain)"/>
+  <g transform="translate(325 120)" fill="none" stroke="#1f2522" stroke-linejoin="round">
+    <path d="M160 74 H774 L900 183 V566 L791 674 H172 L62 560 V184 Z" stroke-width="18" opacity=".55"/>
+    <path d="M160 74 H774 L900 183 V566 L791 674 H172 L62 560 V184 Z" stroke="#5f655d" stroke-width="5" opacity=".8"/>
+    <path d="M247 181 H700 L790 262 V501 L704 588 H262 L172 501 V262 Z" stroke-width="5" opacity=".36"/>
+    <path d="M373 303 H590 V470 H373 Z" stroke-width="6" opacity=".42"/>
+    <path d="M130 119 h95 M735 119 h105 M21 334 h104 M833 334 h111 M455 46 v103 M455 599 v107" stroke="#7d2e24" stroke-width="13" opacity=".52"/>
+    <path d="M431 375 C517 326 581 320 655 360" stroke="#2f6f73" stroke-width="8" opacity=".45"/>
+    <path d="M265 253 h120 M265 314 h104 M265 376 h120 M610 252 h102 M623 316 h126 M609 384 h112" stroke-width="3" opacity=".25"/>
+  </g>
+  <g fill="#a7342b" opacity=".18">
+    <circle cx="433" cy="239" r="54"/>
+    <circle cx="1162" cy="445" r="68"/>
+    <circle cx="890" cy="728" r="46"/>
+  </g>
+  <g fill="none" stroke="#7d2e24" stroke-linecap="round" opacity=".5">
+    <path d="M1084 158 C1182 211 1232 287 1250 377" stroke-width="8"/>
+    <path d="M1113 153 l-33 8 l17 30" stroke-width="8"/>
+    <path d="M1261 173 C1328 254 1354 325 1349 431" stroke-width="7" stroke-dasharray="17 14"/>
+  </g>
+  <g fill="#3a3026" opacity=".22">
+    <rect x="744" y="401" width="111" height="64" rx="2"/>
+    <rect x="626" y="502" width="94" height="52" rx="2"/>
+    <rect x="830" y="512" width="90" height="50" rx="2"/>
+  </g>
+</svg>

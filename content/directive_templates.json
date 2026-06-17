@@ -1,0 +1,58 @@
+[
+  {
+    "id": "appointment",
+    "label": "任命诏",
+    "form": "圣旨",
+    "domain": "人事",
+    "fields": ["target", "assignee", "authority", "deadline", "risk"]
+  },
+  {
+    "id": "funding",
+    "label": "拨款/开内帑",
+    "form": "圣旨",
+    "domain": "财政",
+    "fields": ["target", "assignee", "resources", "deadline", "audit", "risk"]
+  },
+  {
+    "id": "audit_secret",
+    "label": "查账密札",
+    "form": "密札",
+    "domain": "监察",
+    "fields": ["target", "assignee", "evidence_goal", "deadline", "secrecy", "risk"]
+  },
+  {
+    "id": "defense_order",
+    "label": "守城军令",
+    "form": "军令",
+    "domain": "军事",
+    "fields": ["gate", "commander", "garrison", "equipment", "deadline", "risk"]
+  },
+  {
+    "id": "repair_wall",
+    "label": "修城诏",
+    "form": "圣旨",
+    "domain": "城防",
+    "fields": ["gate", "assignee", "resources", "labor", "deadline", "risk"]
+  },
+  {
+    "id": "gate_search",
+    "label": "排查城门",
+    "form": "密札",
+    "domain": "城防",
+    "fields": ["gate", "assignee", "method", "deadline", "risk"]
+  },
+  {
+    "id": "confrontation",
+    "label": "殿前对质令",
+    "form": "御前处分",
+    "domain": "司法",
+    "fields": ["case", "suspects", "evidence_refs", "judgment_options", "risk"]
+  },
+  {
+    "id": "negotiation",
+    "label": "议和国书",
+    "form": "国书",
+    "domain": "外交",
+    "fields": ["demand", "public_text", "fallback", "deadline", "risk"]
+  }
+]

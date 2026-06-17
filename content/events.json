@@ -1,0 +1,47 @@
+[
+  {
+    "id": "jin_southbound",
+    "title": "金军南下",
+    "kind": "边报",
+    "summary": "河北急奏：金军前锋逼近黄河，真定、中山人心震动。",
+    "urgency": 96,
+    "severity": 92,
+    "credibility": 86,
+    "interests": ["河北", "河东", "金军"],
+    "audiences": ["李纲", "主和宰执", "种师道"],
+    "actions": ["召见李纲", "发勤王诏", "修城备器"],
+    "status": "active",
+    "read": 0,
+    "focus": 1
+  },
+  {
+    "id": "guards_pay_arrears",
+    "title": "禁军欠饷",
+    "kind": "财报",
+    "summary": "殿前司称三月未得全饷，夜间已有士卒聚饮鼓噪。",
+    "urgency": 91,
+    "severity": 84,
+    "credibility": 72,
+    "interests": ["户部", "殿前司", "转运财税网络"],
+    "audiences": ["户部尚书", "皇城司使", "禁军都虞候"],
+    "actions": ["召见户部", "密查账册", "补发急饷"],
+    "status": "active",
+    "read": 0,
+    "focus": 1
+  },
+  {
+    "id": "li_gang_requests_defense",
+    "title": "李纲请守",
+    "kind": "朝政",
+    "summary": "李纲上奏请专任城防，言宣化门器械不足、夜值不严。",
+    "urgency": 84,
+    "severity": 78,
+    "credibility": 82,
+    "interests": ["主战清议", "主和宰执", "殿前司"],
+    "audiences": ["李纲", "工部官", "开封府尹"],
+    "actions": ["召见李纲", "任命临督", "拨器械修城"],
+    "status": "active",
+    "read": 0,
+    "focus": 0
+  }
+]

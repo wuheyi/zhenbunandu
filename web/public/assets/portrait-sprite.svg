@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="北宋人物立绘拼图">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff8e8"/>
+      <stop offset="1" stop-color="#d8c49a"/>
+    </linearGradient>
+    <linearGradient id="robeA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#33453c"/>
+      <stop offset="1" stop-color="#1f2522"/>
+    </linearGradient>
+    <linearGradient id="robeB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5f655d"/>
+      <stop offset="1" stop-color="#3a3026"/>
+    </linearGradient>
+    <linearGradient id="robeC" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6f73"/>
+      <stop offset="1" stop-color="#1f4547"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#d8c49a"/>
+  <g font-family="serif">
+    <g transform="translate(0 0)">
+      <rect width="400" height="400" fill="url(#bg)"/>
+      <ellipse cx="200" cy="382" rx="130" ry="106" fill="url(#robeA)"/>
+      <circle cx="200" cy="170" r="72" fill="#d5a56f"/>
+      <path d="M130 162 C143 88 259 88 270 162 C245 132 160 132 130 162Z" fill="#1f2522"/>
+      <rect x="146" y="74" width="108" height="28" rx="4" fill="#1f2522"/>
+      <path d="M139 240 C174 270 231 270 263 240 L292 345 H108Z" fill="#24332c"/>
+      <path d="M169 168 h20 M213 168 h20" stroke="#1f2522" stroke-width="5" stroke-linecap="round"/>
+      <path d="M177 214 C196 228 218 228 236 214" stroke="#5a2d24" stroke-width="4" fill="none"/>
+    </g>
+    <g transform="translate(400 0)">
+      <rect width="400" height="400" fill="url(#bg)"/>
+      <ellipse cx="200" cy="388" rx="138" ry="110" fill="url(#robeB)"/>
+      <circle cx="200" cy="174" r="70" fill="#d0a06d"/>
+      <rect x="143" y="77" width="114" height="26" rx="4" fill="#1f2522"/>
+      <path d="M134 153 C164 108 237 107 267 153" fill="#1f2522"/>
+      <path d="M119 252 C157 283 243 284 281 252 L310 356 H92Z" fill="#4e4638"/>
+      <path d="M168 170 h18 M214 170 h18" stroke="#1f2522" stroke-width="5" stroke-linecap="round"/>
+      <path d="M176 217 C196 210 217 210 237 217" stroke="#5a2d24" stroke-width="4" fill="none"/>
+    </g>
+    <g transform="translate(800 0)">
+      <rect width="400" height="400" fill="url(#bg)"/>
+      <ellipse cx="200" cy="384" rx="130" ry="105" fill="url(#robeC)"/>
+      <circle cx="200" cy="172" r="69" fill="#c99564"/>
+      <rect x="141" y="75" width="118" height="28" rx="4" fill="#1f2522"/>
+      <path d="M126 158 C156 94 244 94 274 158" fill="#171b19"/>
+      <path d="M111 250 C157 282 244 282 291 250 L314 352 H86Z" fill="#204a4c"/>
+      <path d="M169 170 h18 M213 170 h18" stroke="#1f2522" stroke-width="5" stroke-linecap="round"/>
+      <path d="M179 218 C196 229 218 229 234 218" stroke="#5a2d24" stroke-width="4" fill="none"/>
+    </g>
+    <g transform="translate(0 400)">
+      <rect width="400" height="400" fill="url(#bg)"/>
+      <ellipse cx="200" cy="384" rx="130" ry="106" fill="#364e49"/>
+      <circle cx="200" cy="174" r="68" fill="#d2a06a"/>
+      <rect x="141" y="78" width="118" height="26" rx="4" fill="#1f2522"/>
+      <path d="M132 157 C163 110 236 110 268 157" fill="#1f2522"/>
+      <path d="M111 252 C152 281 248 281 289 252 L316 354 H83Z" fill="#2f4c48"/>
+      <path d="M168 171 h18 M214 171 h18" stroke="#1f2522" stroke-width="5" stroke-linecap="round"/>
+      <path d="M178 217 C196 224 218 224 235 217" stroke="#5a2d24" stroke-width="4" fill="none"/>
+    </g>
+    <g transform="translate(400 400)">
+      <rect width="400" height="400" fill="url(#bg)"/>
+      <ellipse cx="200" cy="386" rx="134" ry="108" fill="#6a3a32"/>
+      <circle cx="200" cy="174" r="70" fill="#c99668"/>
+      <rect x="140" y="76" width="120" height="28" rx="4" fill="#1f2522"/>
+      <path d="M128 160 C159 100 243 99 272 160" fill="#1f2522"/>
+      <path d="M108 252 C156 286 242 286 292 252 L318 354 H82Z" fill="#5d332e"/>
+      <path d="M166 171 h18 M214 171 h18" stroke="#1f2522" stroke-width="5" stroke-linecap="round"/>
+      <path d="M174 220 C195 208 218 208 239 220" stroke="#5a2d24" stroke-width="4" fill="none"/>
+    </g>
+    <g transform="translate(800 400)">
+      <rect width="400" height="400" fill="url(#bg)"/>
+      <ellipse cx="200" cy="386" rx="132" ry="108" fill="#493c2f"/>
+      <circle cx="200" cy="175" r="68" fill="#c69061"/>
+      <rect x="141" y="77" width="118" height="26" rx="4" fill="#1f2522"/>
+      <path d="M128 161 C160 102 240 101 272 161" fill="#1f2522"/>
+      <path d="M109 254 C158 284 244 284 291 254 L316 354 H84Z" fill="#40362c"/>
+      <path d="M166 172 h19 M214 172 h19" stroke="#1f2522" stroke-width="5" stroke-linecap="round"/>
+      <path d="M175 221 C196 216 219 216 240 221" stroke="#5a2d24" stroke-width="4" fill="none"/>
+    </g>
+  </g>
+</svg>

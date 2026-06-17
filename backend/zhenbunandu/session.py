@@ -258,12 +258,14 @@ class GameSession:
         metrics: list[dict[str, Any]],
         siege: dict[str, Any],
         terms: list[dict[str, Any]] | None = None,
+        incidents: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         metric_map = {item["key"]: int(item["value"]) for item in metrics}
         severity = int(diplomacy.get("demand_severity", 0))
         leverage = int(diplomacy.get("leverage", 0))
         defense_total = int(siege.get("city_defense", 0)) + int(siege.get("defender_will", 0)) + leverage
         active_term = next((term for term in terms or [] if term["status"] == "active"), None)
+        active_incident = next((incident for incident in incidents or [] if incident["status"] == "active"), None)
 
         def option(
             action: str,
@@ -361,6 +363,47 @@ class GameSession:
                     ["履约 +25", "失信风险 -20", "急躁 -5", "宋方筹码 +2"],
                     available=available_money >= (2 if active_term["kind"] == "divide" else 4),
                     disabled_reason="钱粮不足，暂时无法补足条款承诺。",
+                ),
+            )
+        if active_incident:
+            options.insert(
+                0,
+                option(
+                    "redeem_envoy",
+                    "赎回使节",
+                    f"按金营留难“{active_incident['envoy_name']}”一事补给犒军尾款，换回使节与草约副本。",
+                    "国库 5，君威小降",
+                    "扣使烈度下降，金方信任回升，急躁下降",
+                    "主和派会借机鼓吹真和，且开了再索金银的口子",
+                    ["国库 -5", "扣使 -35", "信任 +6", "急躁 -8"],
+                    available=metric_map.get("国库", 0) >= 5,
+                    disabled_reason="国库不足，拿不出赎使与犒军尾款。",
+                ),
+            )
+            options.insert(
+                1,
+                option(
+                    "extract_envoy",
+                    "密取使节",
+                    f"让皇城司借金营内讧暗线接出“{active_incident['envoy_name']}”。",
+                    "内帑 3，信任下降",
+                    "扣使烈度下降，金营内讧上升，宋方筹码增加",
+                    "若走漏，金营会把密取视作背约，后续索约更硬",
+                    ["内帑 -3", "扣使 -25", "内讧 +8", "筹码 +5"],
+                    available=metric_map.get("内帑", 0) >= 3,
+                    disabled_reason="内帑不足，皇城司无法打通金营暗线。",
+                ),
+            )
+            options.insert(
+                2,
+                option(
+                    "abandon_envoy",
+                    "弃使明底线",
+                    "公开承认使节受辱也不许割地质子，把谈判焦点转回守城。",
+                    "金军威压上升",
+                    "君威和守军战意上升，主和压力下降",
+                    "使节难返，金营急躁与条件都会上升",
+                    ["君威 +5", "守军战意 +4", "急躁 +8", "金军威压 +6"],
                 ),
             )
         return options
@@ -507,7 +550,12 @@ class GameSession:
             route["blocked_nodes"] = sum(1 for node in nodes if int(node["risk"]) >= 55)
         clocks = self.db.rows("SELECT * FROM faction_clocks ORDER BY value DESC, rowid")
         diplomacy = self.db.row("SELECT * FROM diplomacy_state WHERE id = 1") or {}
-        diplomacy_terms = self.db.rows("SELECT * FROM diplomacy_terms ORDER BY status, due_turn, id")
+        diplomacy_terms = self.db.rows(
+            "SELECT * FROM diplomacy_terms ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, due_turn, id"
+        )
+        diplomacy_incidents = self.db.rows(
+            "SELECT * FROM diplomacy_incidents ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, deadline_turn, id"
+        )
         guidance = self._build_guidance(game, metrics, siege, events, directives, cases, routes, clocks)
         postmortem = self._build_postmortem(game, metrics, siege, issues, routes)
         return {
@@ -516,7 +564,8 @@ class GameSession:
             "siege": siege,
             "diplomacy": diplomacy,
             "diplomacy_terms": diplomacy_terms,
-            "diplomacy_options": self._build_diplomacy_options(diplomacy, metrics, siege, diplomacy_terms),
+            "diplomacy_incidents": diplomacy_incidents,
+            "diplomacy_options": self._build_diplomacy_options(diplomacy, metrics, siege, diplomacy_terms, diplomacy_incidents),
             "events": events,
             "issues": issues,
             "ministers": self.db.rows("SELECT * FROM characters ORDER BY rowid"),
@@ -1221,6 +1270,36 @@ class GameSession:
             }
         )
 
+    def _draft_treaty_text(self, term: dict[str, Any]) -> str:
+        return (
+            f"草约：一，宋廷仍以“{term['title']}”为前议，限第 {int(term['due_turn']) + 1} 回合前补足回书、使费与犒军凭据；"
+            "二，金营暂缓强攻，但保留复索犒军、质子与罢免主战臣之议；"
+            "三，若再以空文迁延，往返使节由金营留验，攻守后果各自承担。"
+        )
+
+    def _create_diplomacy_incident_from_breach(self, term: dict[str, Any], turn: int) -> dict[str, Any]:
+        existing = self.db.row(
+            "SELECT * FROM diplomacy_incidents WHERE kind = 'detained_envoy' AND status = 'active' ORDER BY id DESC LIMIT 1"
+        )
+        if existing:
+            return existing
+        return self.db.create_diplomacy_incident(
+            {
+                "title": "金营扣留宋使",
+                "kind": "detained_envoy",
+                "status": "active",
+                "envoy_name": "往返国书使",
+                "jin_actor": "东路军都监",
+                "deadline_turn": turn + 2,
+                "severity": 58 + min(22, int(term["breach_risk"]) // 4),
+                "leverage": max(18, 48 - int(term["compliance"]) // 2),
+                "summary": f"因“{term['title']}”失信，金营扣留往返国书使，要求宋廷补足犒军与正式回书。",
+                "demand": term["demand"],
+                "treaty_text": self._draft_treaty_text(term),
+                "created_turn": turn,
+            }
+        )
+
     def _resolve_diplomacy_terms(
         self,
         turn: int,
@@ -1263,20 +1342,21 @@ class GameSession:
                 siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) + 8
                 siege_deltas["peace_pressure"] = siege_deltas.get("peace_pressure", 0) + 4
                 metric_deltas["君威"] = metric_deltas.get("君威", 0) - 2
-                warnings.append("外交条款失信，金营可能扣使、加索金银或转入再攻。")
+                warnings.insert(0, "外交条款失信，金营可能扣使、加索金银或转入再攻。")
                 timeline.append(result)
+                incident = self._create_diplomacy_incident_from_breach(term, turn)
                 self.db.upsert_event(
                     {
                         "id": f"diplomacy_breach_{term['id']}",
                         "title": "金营斥宋失信",
                         "kind": "外交",
-                        "summary": "金使称宋廷只以空文拖延，留难往返使节，并把犒军、质子和罢免主战臣一并加码。",
+                        "summary": f"金使称宋廷只以空文拖延，{incident['jin_actor']}留难{incident['envoy_name']}，并把犒军、质子和罢免主战臣一并加码。",
                         "urgency": 82,
                         "severity": 74,
                         "credibility": 72,
                         "interests": ["金营", "主和派", "皇城司"],
                         "audiences": ["主和宰执", "皇城司使", "李纲"],
-                        "actions": ["补足条款", "拒割地质子", "分化金营"],
+                        "actions": ["赎回使节", "密取使节", "拒割地质子"],
                         "status": "active",
                         "read": 0,
                         "focus": 1,
@@ -1299,6 +1379,73 @@ class GameSession:
                     sentiment,
                     4,
                     json.dumps(["金宋谈判", "外交条款", term["title"]], ensure_ascii=False),
+                ),
+            )
+
+    def _resolve_diplomacy_incidents(
+        self,
+        turn: int,
+        metric_deltas: dict[str, int],
+        siege_deltas: dict[str, int],
+        diplomacy_deltas: dict[str, int],
+        timeline: list[str],
+        warnings: list[str],
+    ) -> None:
+        incidents = self.db.rows("SELECT * FROM diplomacy_incidents WHERE status = 'active' ORDER BY deadline_turn, id")
+        for incident in incidents:
+            severity = int(incident["severity"])
+            deadline_turn = int(incident["deadline_turn"])
+            if deadline_turn > turn + 1:
+                if severity >= 70:
+                    diplomacy_deltas["impatience"] = diplomacy_deltas.get("impatience", 0) + 2
+                    warnings.insert(0, f"{incident['title']}仍未处置，{incident['jin_actor']}催索草约回书。")
+                continue
+
+            result = f"{incident['title']}拖过限期，{incident['jin_actor']}公开辱使并加索犒军，主和派借此逼请真和。"
+            self.db.change_diplomacy_incident(
+                int(incident["id"]),
+                {"status": "escalated", "severity": 18, "resolution": result},
+            )
+            diplomacy_deltas["trust"] = diplomacy_deltas.get("trust", 0) - 8
+            diplomacy_deltas["impatience"] = diplomacy_deltas.get("impatience", 0) + 12
+            diplomacy_deltas["demand_severity"] = diplomacy_deltas.get("demand_severity", 0) + 7
+            siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) + 7
+            siege_deltas["peace_pressure"] = siege_deltas.get("peace_pressure", 0) + 6
+            metric_deltas["君威"] = metric_deltas.get("君威", 0) - 3
+            warnings.insert(0, "扣使风波升级，若不立刻守住割地质子底线，朝堂会被真和议牵走。")
+            timeline.append(result)
+            self.db.upsert_event(
+                {
+                    "id": f"diplomacy_envoy_escalation_{incident['id']}",
+                    "title": "扣使风波升级",
+                    "kind": "外交",
+                    "summary": "金营公开辱使并递出更硬草约，主和派称唯有真和才能保城。",
+                    "urgency": 86,
+                    "severity": 78,
+                    "credibility": 76,
+                    "interests": ["金营", "主和派", "台谏清议"],
+                    "audiences": ["主和宰执", "李纲", "皇城司使"],
+                    "actions": ["拒割地质子", "强硬拒使", "分化金营"],
+                    "status": "active",
+                    "read": 0,
+                    "focus": 1,
+                }
+            )
+            self.db.conn.execute(
+                """INSERT INTO memories
+                   (subject_type, subject_id, turn, title, cause, process, outcome, sentiment, importance, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "diplomacy_incident",
+                    str(incident["id"]),
+                    turn,
+                    incident["title"],
+                    incident["summary"],
+                    "宋廷未能在限期前处置扣使。",
+                    result,
+                    "negative",
+                    4,
+                    json.dumps(["金宋谈判", "扣使", incident["title"]], ensure_ascii=False),
                 ),
             )
 
@@ -1379,6 +1526,71 @@ class GameSession:
                 self.db.change_diplomacy("leverage", 2)
                 self.db.change_siege("peace_pressure", 2)
                 status = "补足条款"
+            elif action == "redeem_envoy":
+                incident = self.db.row(
+                    "SELECT * FROM diplomacy_incidents WHERE status = 'active' ORDER BY deadline_turn, id LIMIT 1"
+                )
+                if not incident:
+                    raise ValueError("当前没有待处置扣使事件。")
+                if self.db.value("国库") < 5:
+                    raise ValueError("国库不足，无法赎回使节。")
+                self._record_ledger(turn, "国库", -5, "扣使赎回", f"赎回{incident['envoy_name']}并补草约使费", "金宋谈判")
+                result = f"宋廷补给犒军尾款与正式回书，{incident['envoy_name']}得返，金营少了继续辱使的借口。"
+                self.db.change_diplomacy_incident(
+                    int(incident["id"]),
+                    {"status": "resolved", "severity": -35, "leverage": 6, "resolution": result},
+                )
+                self.db.change_diplomacy("trust", 6)
+                self.db.change_diplomacy("impatience", -8)
+                self.db.change_diplomacy("demand_severity", -3)
+                self.db.change_siege("jin_pressure", -2)
+                self.db.change_siege("peace_pressure", 3)
+                self.db.change_metric("君威", -2)
+                self.db.change_faction_clock("southern_flight_talk", 4)
+                status = "赎回使节"
+            elif action == "extract_envoy":
+                incident = self.db.row(
+                    "SELECT * FROM diplomacy_incidents WHERE status = 'active' ORDER BY deadline_turn, id LIMIT 1"
+                )
+                if not incident:
+                    raise ValueError("当前没有待处置扣使事件。")
+                if self.db.value("内帑") < 3:
+                    raise ValueError("内帑不足，无法密取使节。")
+                self._record_ledger(turn, "内帑", -3, "扣使密取", f"打通金营暗线接出{incident['envoy_name']}", "金宋谈判", "秘密")
+                result = f"皇城司借金营争功缝隙接出{incident['envoy_name']}，草约副本亦被带回御前。"
+                self.db.change_diplomacy_incident(
+                    int(incident["id"]),
+                    {"status": "resolved", "severity": -25, "leverage": 12, "resolution": result},
+                )
+                self.db.change_diplomacy("trust", -4)
+                self.db.change_diplomacy("impatience", -4)
+                self.db.change_diplomacy("internal_tension", 8)
+                self.db.change_diplomacy("leverage", 5)
+                self.db.change_siege("jin_pressure", -3)
+                self.db.change_siege("peace_pressure", -1)
+                status = "密取使节"
+            elif action == "abandon_envoy":
+                incident = self.db.row(
+                    "SELECT * FROM diplomacy_incidents WHERE status = 'active' ORDER BY deadline_turn, id LIMIT 1"
+                )
+                if not incident:
+                    raise ValueError("当前没有待处置扣使事件。")
+                result = f"御前明示不以使节受辱换割地质子，{incident['envoy_name']}仍陷金营，朝中战和分野更明。"
+                self.db.change_diplomacy_incident(
+                    int(incident["id"]),
+                    {"status": "abandoned", "severity": 10, "leverage": 4, "resolution": result},
+                )
+                self.db.change_diplomacy("trust", -12)
+                self.db.change_diplomacy("impatience", 8)
+                self.db.change_diplomacy("demand_severity", 6)
+                self.db.change_diplomacy("leverage", 4)
+                self.db.change_siege("jin_pressure", 6)
+                self.db.change_siege("peace_pressure", -6)
+                self.db.change_siege("defender_will", 4)
+                self.db.change_metric("君威", 5)
+                self.db.change_faction_clock("southern_flight_talk", -4)
+                self.db.change_faction_clock("li_gang_removal", -2)
+                status = "弃使明底线"
             elif action == "hardline":
                 siege = self.db.row("SELECT * FROM siege_state WHERE id = 1") or {}
                 leverage = int(diplomacy.get("leverage", 0))
@@ -1578,6 +1790,7 @@ class GameSession:
                 self.db.change_faction_clock("grain_market_strike", 4)
             clock_warnings = self._apply_faction_clocks(metric_deltas, siege_deltas, timeline)
             self._resolve_diplomacy_terms(turn, metric_deltas, siege_deltas, diplomacy_deltas, timeline, clock_warnings)
+            self._resolve_diplomacy_incidents(turn, metric_deltas, siege_deltas, diplomacy_deltas, timeline, clock_warnings)
             self._resolve_night_attack(turn, metric_deltas, siege_deltas, timeline)
             for key, delta in metric_deltas.items():
                 if delta:

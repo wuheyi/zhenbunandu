@@ -35,6 +35,7 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert {option["action"] for option in state["diplomacy_options"]} >= {"stall", "tribute", "hardline", "divide"}
     assert state["diplomacy"]["status"] == "未接触"
     assert state["diplomacy_terms"] == []
+    assert state["diplomacy_incidents"] == []
     assert state["guidance"]["stage"] == "初登大宝"
     assert any(tip["target"] == "minister:li_gang" for tip in state["guidance"]["tips"])
     assert state["postmortem"]["status"] == "active"
@@ -172,8 +173,48 @@ def test_diplomacy_term_breach_resolves_into_report_and_event(tmp_path: Path) ->
     breached = resolved["diplomacy_terms"][0]
     assert breached["status"] == "breached"
     assert "失信" in breached["result"]
+    incident = resolved["diplomacy_incidents"][0]
+    assert incident["status"] == "active"
+    assert incident["title"] == "金营扣留宋使"
+    assert "草约" in incident["treaty_text"]
+    assert any(option["action"] == "redeem_envoy" for option in resolved["diplomacy_options"])
     assert any(event["id"].startswith("diplomacy_breach_") for event in resolved["events"])
     assert any("外交条款失信" in warning for warning in resolved["reports"][0]["warnings"])
+
+
+def test_detained_envoy_can_be_redeemed_or_escalate(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    game.diplomacy_action("stall")
+    term = game.state()["diplomacy_terms"][0]
+    game.db.conn.execute(
+        "UPDATE diplomacy_terms SET due_turn = 1, compliance = 15, breach_risk = 85 WHERE id = ?",
+        (term["id"],),
+    )
+    breached = game.resolve_turn()["state"]
+    incident = breached["diplomacy_incidents"][0]
+
+    redeemed = game.diplomacy_action("redeem_envoy")["state"]
+    resolved_incident = redeemed["diplomacy_incidents"][0]
+    assert resolved_incident["status"] == "resolved"
+    assert "得返" in resolved_incident["resolution"]
+    assert redeemed["diplomacy"]["status"] == "赎回使节"
+    assert redeemed["ledger"][0]["category"] == "扣使赎回"
+
+    game = make_session(tmp_path)
+    game.diplomacy_action("stall")
+    term = game.state()["diplomacy_terms"][0]
+    game.db.conn.execute(
+        "UPDATE diplomacy_terms SET due_turn = 1, compliance = 15, breach_risk = 85 WHERE id = ?",
+        (term["id"],),
+    )
+    game.resolve_turn()
+    incident = game.state()["diplomacy_incidents"][0]
+    game.db.conn.execute("UPDATE diplomacy_incidents SET deadline_turn = 1 WHERE id = ?", (incident["id"],))
+    escalated = game.resolve_turn()["state"]
+    escalated_incident = escalated["diplomacy_incidents"][0]
+    assert escalated_incident["status"] == "escalated"
+    assert any(event["id"].startswith("diplomacy_envoy_escalation_") for event in escalated["events"])
+    assert any("扣使风波升级" in warning for warning in escalated["reports"][0]["warnings"])
 
 
 def test_second_turn_can_generate_night_attack_report(tmp_path: Path) -> None:

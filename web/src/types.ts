@@ -61,6 +61,24 @@ export type DiplomacyTerm = {
   last_delta: number;
 };
 
+export type DiplomacyIncident = {
+  id: number;
+  title: string;
+  kind: string;
+  status: string;
+  envoy_name: string;
+  jin_actor: string;
+  deadline_turn: number;
+  severity: number;
+  leverage: number;
+  summary: string;
+  demand: string;
+  treaty_text: string;
+  resolution: string;
+  created_turn: number;
+  last_delta: number;
+};
+
 export type EventItem = {
   id: string;
   title: string;
@@ -356,6 +374,7 @@ export type GameState = {
   siege: SiegeState;
   diplomacy: DiplomacyState;
   diplomacy_terms: DiplomacyTerm[];
+  diplomacy_incidents: DiplomacyIncident[];
   diplomacy_options: DiplomacyOption[];
   events: EventItem[];
   issues: Issue[];

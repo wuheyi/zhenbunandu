@@ -17,7 +17,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { Army, CourtCase, Directive, DiplomacyOption, DiplomacyTerm, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
+import type { Army, CourtCase, Directive, DiplomacyIncident, DiplomacyOption, DiplomacyTerm, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
 import "./styles.css";
 
 type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater" | "diplomacy";
@@ -988,6 +988,7 @@ function DiplomacyModal({
             <MetricLine label="内讧" value={diplomacy.internal_tension} />
             <MetricLine label="筹码" value={diplomacy.leverage} />
           </div>
+          <DiplomacyIncidentsPanel incidents={state.diplomacy_incidents || []} />
           <DiplomacyTermsPanel terms={state.diplomacy_terms || []} />
         </section>
         <section className="diplomacy-options">
@@ -997,6 +998,36 @@ function DiplomacyModal({
         </section>
       </div>
     </Modal>
+  );
+}
+
+function DiplomacyIncidentsPanel({ incidents }: { incidents: DiplomacyIncident[] }) {
+  const visibleIncidents = incidents.slice(0, 3);
+  return (
+    <div className="diplomacy-incidents-panel">
+      <div className="subhead-line">
+        <b>使节与草约</b>
+        <span>{incidents.filter((incident) => incident.status === "active").length} 件急务</span>
+      </div>
+      {visibleIncidents.length ? visibleIncidents.map((incident) => (
+        <article className={`diplomacy-incident ${incident.status}`} key={incident.id}>
+          <div className="diplomacy-term-head">
+            <b>{incident.title}</b>
+            <span>{incident.status === "active" ? `限第 ${incident.deadline_turn} 回合` : incident.status}</span>
+          </div>
+          <p>{incident.resolution || incident.summary}</p>
+          <div className="envoy-line">
+            <span>宋使：{incident.envoy_name}</span>
+            <span>金营：{incident.jin_actor}</span>
+          </div>
+          {incident.treaty_text && <blockquote>{incident.treaty_text}</blockquote>}
+          <div className="term-meter-grid">
+            <MetricLine label="扣使" value={incident.severity} dangerHigh />
+            <MetricLine label="草约筹码" value={incident.leverage} />
+          </div>
+        </article>
+      )) : <p className="muted">尚无扣使或正式草约。条款失信后，金营会把使节与文书变成新的压力。</p>}
+    </div>
   );
 }
 

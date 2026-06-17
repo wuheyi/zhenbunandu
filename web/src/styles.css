@@ -1403,11 +1403,41 @@ input {
   margin-top: 14px;
 }
 
+.retaliation-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(58, 48, 38, .16);
+}
+
 .clock-card {
   min-height: 170px;
   padding: 12px;
   background: rgba(216, 196, 154, .2);
   border: 1px solid rgba(58, 48, 38, .16);
+}
+
+.retaliation-card {
+  min-height: 168px;
+  padding: 12px;
+  background: rgba(216, 196, 154, .18);
+  border: 1px solid rgba(58, 48, 38, .16);
+}
+
+.retaliation-card.active {
+  border-color: rgba(181, 111, 41, .46);
+}
+
+.retaliation-card.triggered,
+.retaliation-card.suppressed {
+  border-color: rgba(167, 52, 43, .44);
+  background: rgba(167, 52, 43, .08);
+}
+
+.retaliation-card.resolved {
+  border-color: rgba(47, 111, 115, .32);
+  background: rgba(47, 111, 115, .08);
 }
 
 .clock-card.stage-2,

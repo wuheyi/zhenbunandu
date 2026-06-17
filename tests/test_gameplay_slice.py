@@ -32,6 +32,7 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert len(state["logistics_routes"]) == 3
     assert any(node["id"] == "capital_grain_market" for route in state["logistics_routes"] for node in route["nodes"])
     assert len(state["faction_clocks"]) >= 5
+    assert state["faction_retaliations"] == []
     assert {option["action"] for option in state["diplomacy_options"]} >= {"stall", "tribute", "hardline", "divide"}
     assert state["diplomacy"]["status"] == "未接触"
     assert state["diplomacy_terms"] == []
@@ -127,6 +128,50 @@ def test_grain_credit_action_lowers_grain_price_and_recovers_market(tmp_path: Pa
     assert after_market["risk"] < market["risk"]
     assert after_market["progress"] > market["progress"]
     assert restored["siege"]["grain_price"] < before["siege"]["grain_price"]
+
+
+def test_faction_retaliation_can_secure_evidence(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    game.db.ensure_evidence_and_case(1)
+    game.db.change_faction_clock("transport_slowdown", 60)
+
+    created = game.resolve_turn()["state"]
+    retaliation = next(item for item in created["faction_retaliations"] if item["kind"] == "destroy_evidence")
+    evidence_before = next(item for item in created["evidence"] if item["id"] == "dongcang副册")
+    clock_before = next(clock for clock in created["faction_clocks"] if clock["id"] == "transport_slowdown")
+    assert retaliation["status"] == "active"
+    assert retaliation["evidence_target"] == "dongcang副册"
+
+    secured = game.faction_retaliation_action(retaliation["id"], "secure_evidence")["state"]
+    secured_retaliation = next(item for item in secured["faction_retaliations"] if item["id"] == retaliation["id"])
+    evidence_after = next(item for item in secured["evidence"] if item["id"] == "dongcang副册")
+    clock_after = next(clock for clock in secured["faction_clocks"] if clock["id"] == "transport_slowdown")
+    assert secured_retaliation["status"] == "resolved"
+    assert evidence_after["status"] == "secured"
+    assert evidence_after["reliability"] > evidence_before["reliability"]
+    assert clock_after["value"] < clock_before["value"]
+    assert secured["ledger"][0]["category"] == "护证密支"
+
+
+def test_faction_retaliation_damages_evidence_when_ignored(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    game.db.ensure_evidence_and_case(1)
+    game.db.change_faction_clock("transport_slowdown", 60)
+    created = game.resolve_turn()["state"]
+    retaliation = next(item for item in created["faction_retaliations"] if item["kind"] == "destroy_evidence")
+    evidence_before = next(item for item in created["evidence"] if item["id"] == "dongcang副册")
+    case_before = next(case for case in created["court_cases"] if case["id"] == "forbidden_army_pay_case")
+    game.db.conn.execute("UPDATE faction_retaliations SET due_turn = 1 WHERE id = ?", (retaliation["id"],))
+
+    resolved = game.resolve_turn()["state"]
+    triggered = next(item for item in resolved["faction_retaliations"] if item["id"] == retaliation["id"])
+    evidence_after = next(item for item in resolved["evidence"] if item["id"] == "dongcang副册")
+    case_after = next(case for case in resolved["court_cases"] if case["id"] == "forbidden_army_pay_case")
+    assert triggered["status"] == "triggered"
+    assert evidence_after["status"] == "compromised"
+    assert evidence_after["strength"] < evidence_before["strength"]
+    assert case_after["risk"] > case_before["risk"]
+    assert any("毁证" in warning for warning in resolved["reports"][0]["warnings"])
 
 
 def test_diplomacy_actions_update_pressure_and_records(tmp_path: Path) -> None:
@@ -258,6 +303,23 @@ def test_api_route_action_and_clock_mitigation_endpoints() -> None:
     clock_response = client.post("/api/faction_clocks/grain_market_strike/mitigate", json={"action": "appease"})
     assert clock_response.status_code == 200
     assert next(clock for clock in clock_response.json()["state"]["faction_clocks"] if clock["id"] == "grain_market_strike")["value"] <= 4
+
+
+def test_api_faction_retaliation_action_endpoint() -> None:
+    api_session.new_game()
+    api_session.db.ensure_evidence_and_case(1)
+    api_session.db.change_faction_clock("transport_slowdown", 60)
+    api_session.resolve_turn()
+    state = api_session.state()
+    retaliation = next(item for item in state["faction_retaliations"] if item["kind"] == "destroy_evidence")
+
+    client = TestClient(app)
+    response = client.post(f"/api/faction_retaliations/{retaliation['id']}/action", json={"action": "split_clique"})
+    assert response.status_code == 200
+    payload = response.json()
+    updated = next(item for item in payload["state"]["faction_retaliations"] if item["id"] == retaliation["id"])
+    assert updated["status"] == "resolved"
+    assert payload["state"]["ledger"][0]["category"] == "分化胁从"
 
 
 def test_api_diplomacy_action_endpoint() -> None:

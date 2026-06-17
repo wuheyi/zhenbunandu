@@ -571,6 +571,9 @@ class GameSession:
             "ministers": self.db.rows("SELECT * FROM characters ORDER BY rowid"),
             "factions": self.db.rows("SELECT * FROM factions ORDER BY rowid"),
             "faction_clocks": clocks,
+            "faction_retaliations": self.db.rows(
+                "SELECT * FROM faction_retaliations ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, due_turn, id"
+            ),
             "regions": self.db.rows("SELECT * FROM regions ORDER BY rowid"),
             "armies": self.db.rows("SELECT * FROM armies ORDER BY rowid"),
             "gates": self.db.rows("SELECT * FROM city_gates ORDER BY rowid"),
@@ -967,6 +970,137 @@ class GameSession:
         )
         return balance
 
+    def _create_faction_retaliation(
+        self,
+        clock: dict[str, Any],
+        *,
+        kind: str,
+        title: str,
+        pressure: int,
+        summary: str,
+        action_hint: str,
+        evidence_target: str = "",
+        linked_case: str = "",
+        due_in: int = 2,
+    ) -> dict[str, Any]:
+        game = self.db.row("SELECT turn FROM game_state WHERE id = 1") or {"turn": 1}
+        turn = int(game.get("turn", 1))
+        return self.db.create_faction_retaliation(
+            {
+                "clock_id": clock["id"],
+                "faction_id": clock["faction_id"],
+                "title": title,
+                "kind": kind,
+                "pressure": pressure,
+                "due_turn": turn + due_in,
+                "evidence_target": evidence_target,
+                "linked_case": linked_case,
+                "summary": summary,
+                "action_hint": action_hint,
+                "created_turn": turn,
+            }
+        )
+
+    def _resolve_faction_retaliations(
+        self,
+        turn: int,
+        metric_deltas: dict[str, int],
+        siege_deltas: dict[str, int],
+        timeline: list[str],
+        warnings: list[str],
+    ) -> None:
+        active = self.db.rows("SELECT * FROM faction_retaliations WHERE status = 'active' ORDER BY due_turn, pressure DESC")
+        for item in active:
+            pressure = int(item["pressure"])
+            if int(item["due_turn"]) > turn + 1:
+                if pressure >= 65:
+                    warnings.append(f"{item['title']}正在酝酿，需在人物档案中护证、分化或威慑。")
+                continue
+
+            if item["kind"] == "destroy_evidence":
+                evidence = self.db.row("SELECT * FROM evidence_items WHERE id = ?", (item["evidence_target"],))
+                if evidence and evidence["status"] not in {"used", "secured", "compromised"}:
+                    next_strength = max(20, int(evidence["strength"]) - 24)
+                    next_reliability = max(20, int(evidence["reliability"]) - 28)
+                    usable = 1 if next_strength >= 45 and next_reliability >= 45 else 0
+                    self.db.conn.execute(
+                        """UPDATE evidence_items
+                           SET strength = ?, reliability = ?, usable_in_court = ?, status = 'compromised',
+                               risk_if_revealed = ?
+                           WHERE id = ?""",
+                        (
+                            next_strength,
+                            next_reliability,
+                            usable,
+                            "转运网络已毁去若干关节，公开时仍可用，但对质风险明显升高。",
+                            item["evidence_target"],
+                        ),
+                    )
+                    case = self.db.row("SELECT * FROM court_cases WHERE id = ?", (item["linked_case"],))
+                    if case:
+                        self.db.conn.execute(
+                            "UPDATE court_cases SET risk = ?, public_pressure = ? WHERE id = ?",
+                            (
+                                clamp(int(case["risk"]) + 16),
+                                clamp(int(case["public_pressure"]) - 8),
+                                item["linked_case"],
+                            ),
+                        )
+                    result = "转运门生抢先毁去东仓副册若干关节，禁军欠饷案仍能审，却更容易被攀咬成党争。"
+                    self.db.change_route("jianghuai_grain_to_bianjing", {"risk": 5, "corruption": 5, "status": "账册缺页"})
+                    self.db.change_faction_clock(item["clock_id"], 6)
+                    metric_deltas["君威"] = metric_deltas.get("君威", 0) - 1
+                else:
+                    result = "转运门生试图毁证，但关键证据已护住或已在殿前公开，反扑只能转入怠工。"
+                    self.db.change_route("jianghuai_grain_to_bianjing", {"risk": 3, "status": "怠工转圜"})
+                self.db.change_faction_retaliation(int(item["id"]), {"status": "triggered", "pressure": 12, "result": result})
+                warnings.insert(0, "转运财税网络抢先毁证，禁军欠饷案的证据强度已受损。")
+            else:
+                result = f"{item['title']}转入抱团串联，相关官署互相担保、称病和拖延。"
+                self.db.change_faction_retaliation(int(item["id"]), {"status": "triggered", "pressure": 10, "result": result})
+                self.db.change_faction_clock(item["clock_id"], 5)
+                self.db.conn.execute(
+                    "UPDATE factions SET backlash = CASE WHEN backlash <= 95 THEN backlash + 5 ELSE 100 END WHERE id = ?",
+                    (item["faction_id"],),
+                )
+                warnings.insert(0, "派系抱团串联成势，下月诏令执行会更依赖护证、分化和点名问责。")
+
+            timeline.append(result)
+            self.db.upsert_event(
+                {
+                    "id": f"faction_retaliation_{item['id']}",
+                    "title": item["title"],
+                    "kind": "派系反扑",
+                    "summary": result,
+                    "urgency": 80,
+                    "severity": max(55, pressure),
+                    "credibility": 72,
+                    "interests": [item["faction_id"], "证据", "朝堂"],
+                    "audiences": ["皇城司使", "户部尚书", "台谏代表"],
+                    "actions": ["护住证据", "分化胁从", "公开威慑"],
+                    "status": "active",
+                    "read": 0,
+                    "focus": 1,
+                }
+            )
+            self.db.conn.execute(
+                """INSERT INTO memories
+                   (subject_type, subject_id, turn, title, cause, process, outcome, sentiment, importance, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "faction_retaliation",
+                    str(item["id"]),
+                    turn,
+                    item["title"],
+                    item["summary"],
+                    "反扑事件未在限期内处置。",
+                    result,
+                    "negative",
+                    4,
+                    json.dumps(["派系反扑", item["kind"], item["title"]], ensure_ascii=False),
+                ),
+            )
+
     def _apply_faction_clocks(
         self,
         metric_deltas: dict[str, int],
@@ -991,6 +1125,19 @@ class GameSession:
                     timeline.append("转运财税网络开始怠工，江淮粮船报称水程、账册皆有阻滞。")
                 if stage >= 3:
                     warnings.append("转运怠工已拖慢粮道，下月宜护粮、查账或保价催运。")
+                    evidence = self.db.row("SELECT * FROM evidence_items WHERE id = 'dongcang副册'")
+                    if evidence and evidence["status"] not in {"used", "secured", "compromised"}:
+                        retaliation = self._create_faction_retaliation(
+                            clock,
+                            kind="destroy_evidence",
+                            title="东仓副册毁证风声",
+                            pressure=64 + stage * 4,
+                            evidence_target="dongcang副册",
+                            linked_case="forbidden_army_pay_case",
+                            summary="转运门生已察觉东仓副册入宫，正抢先补账、换页并串供。",
+                            action_hint="可令皇城司护证，或分化胁从、公开威慑转运官。",
+                        )
+                        warnings.append(f"{retaliation['title']}出现，若拖过限期，禁军欠饷案证据会受损。")
                     self.db.upsert_event(
                         {
                             "id": "clock_transport_slowdown",
@@ -1007,6 +1154,16 @@ class GameSession:
                             "read": 0,
                             "focus": 1,
                         }
+                    )
+                if stage >= 4:
+                    self._create_faction_retaliation(
+                        clock,
+                        kind="clique",
+                        title="转运门生抱团",
+                        pressure=58 + stage * 5,
+                        summary="转运司、仓场和旧党门生开始互相具保，称病、缺页和推诿连成一片。",
+                        action_hint="可分化胁从，或用公开威慑压住串联。",
+                        due_in=2,
                     )
             elif clock_id == "western_army_grievance":
                 self.db.change_route("shaanxi_relief_army", {"risk": stage + 2, "eta": 1 if stage >= 3 else 0, "current_load": -1})
@@ -1244,6 +1401,85 @@ class GameSession:
                 ),
             )
         return {"clock": next_clock, "result": result, "state": self.state()}
+
+    def faction_retaliation_action(self, retaliation_id: int, action: str = "secure_evidence") -> dict[str, Any]:
+        retaliation = self.db.row("SELECT * FROM faction_retaliations WHERE id = ?", (retaliation_id,))
+        if not retaliation:
+            raise KeyError("未找到此派系反扑事件。")
+        if retaliation["status"] != "active":
+            return {"retaliation": retaliation, "result": retaliation.get("result", ""), "state": self.state()}
+        game = self.db.row("SELECT * FROM game_state WHERE id = 1") or {"turn": 1}
+        turn = int(game.get("turn", 1))
+        action = action or "secure_evidence"
+        with self.db.conn:
+            if action == "secure_evidence":
+                if self.db.value("内帑") < 2:
+                    raise ValueError("内帑不足，无法派皇城司护证。")
+                self._record_ledger(turn, "内帑", -2, "护证密支", f"护住{retaliation['title']}相关账册", "人物谱", "秘密")
+                evidence = self.db.row("SELECT * FROM evidence_items WHERE id = ?", (retaliation["evidence_target"],))
+                if evidence:
+                    self.db.conn.execute(
+                        """UPDATE evidence_items
+                           SET reliability = ?, strength = ?, status = 'secured',
+                               risk_if_revealed = ?
+                           WHERE id = ?""",
+                        (
+                            clamp(int(evidence["reliability"]) + 10),
+                            clamp(int(evidence["strength"]) + 4),
+                            "皇城司已护住原件与副本，公开后仍会触动转运网络，但证据链更稳。",
+                            evidence["id"],
+                        ),
+                    )
+                self.db.change_faction_clock(retaliation["clock_id"], -12)
+                self.db.conn.execute(
+                    "UPDATE factions SET fear = fear + 2, backlash = CASE WHEN backlash >= 1 THEN backlash - 1 ELSE backlash END WHERE id = ?",
+                    (retaliation["faction_id"],),
+                )
+                result = "皇城司先一步护住账册原件和抄副，毁证链条被截断。"
+                updated = self.db.change_faction_retaliation(int(retaliation_id), {"status": "resolved", "pressure": -35, "result": result})
+            elif action == "split_clique":
+                self._record_ledger(turn, "国库", -2, "分化胁从", f"分化{retaliation['title']}胁从官吏", "人物谱")
+                self.db.change_faction_clock(retaliation["clock_id"], -10)
+                self.db.conn.execute(
+                    """UPDATE factions
+                       SET affinity = affinity + 2,
+                           backlash = CASE WHEN backlash >= 3 THEN backlash - 3 ELSE 0 END
+                       WHERE id = ?""",
+                    (retaliation["faction_id"],),
+                )
+                if retaliation["kind"] == "clique":
+                    self.db.change_route("jianghuai_grain_to_bianjing", {"corruption": -3, "risk": -2, "status": "胁从松动"})
+                result = "区分首恶与胁从后，部分转运小吏愿交出缺页线索，抱团声势回落。"
+                updated = self.db.change_faction_retaliation(int(retaliation_id), {"status": "resolved", "pressure": -28, "result": result})
+            elif action == "pressure":
+                self.db.change_metric("君威", 1)
+                self.db.change_faction_clock(retaliation["clock_id"], -8)
+                self.db.conn.execute(
+                    "UPDATE factions SET fear = fear + 5, backlash = backlash + 3 WHERE id = ?",
+                    (retaliation["faction_id"],),
+                )
+                result = "御前明示再有毁证、称病者即下狱，反扑暂被压住，但仇怨也更深。"
+                updated = self.db.change_faction_retaliation(int(retaliation_id), {"status": "suppressed", "pressure": -18, "result": result})
+            else:
+                raise ValueError("未知反扑处置。")
+            self.db.conn.execute(
+                """INSERT INTO memories
+                   (subject_type, subject_id, turn, title, cause, process, outcome, sentiment, importance, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "faction_retaliation",
+                    str(retaliation_id),
+                    turn,
+                    f"{retaliation['title']}处置",
+                    retaliation["summary"],
+                    f"皇帝采取{action}处置派系反扑。",
+                    result,
+                    "mixed",
+                    4,
+                    json.dumps(["派系反扑", retaliation["title"], action], ensure_ascii=False),
+                ),
+            )
+        return {"retaliation": updated, "result": result, "state": self.state()}
 
     def _create_diplomacy_term(
         self,
@@ -1789,6 +2025,7 @@ class GameSession:
                 self.db.change_faction_clock("transport_slowdown", 3)
                 self.db.change_faction_clock("grain_market_strike", 4)
             clock_warnings = self._apply_faction_clocks(metric_deltas, siege_deltas, timeline)
+            self._resolve_faction_retaliations(turn, metric_deltas, siege_deltas, timeline, clock_warnings)
             self._resolve_diplomacy_terms(turn, metric_deltas, siege_deltas, diplomacy_deltas, timeline, clock_warnings)
             self._resolve_diplomacy_incidents(turn, metric_deltas, siege_deltas, diplomacy_deltas, timeline, clock_warnings)
             self._resolve_night_attack(turn, metric_deltas, siege_deltas, timeline)
@@ -1920,6 +2157,17 @@ class GameSession:
                 (clamp(14 + 24), clamp(42 + 9), clamp(35 - 8)),
             )
             self.db.change_faction_clock("transport_slowdown", 15)
+            clock = self.db.row("SELECT * FROM faction_clocks WHERE id = 'transport_slowdown'")
+            if clock:
+                self._create_faction_retaliation(
+                    clock,
+                    kind="clique",
+                    title="转运门生抱团",
+                    pressure=72,
+                    summary="禁军欠饷案刚裁断，转运司、仓场和旧党门生开始互相具保，称病、缺页和推诿连成一片。",
+                    action_hint="可分化胁从，或用公开威慑压住串联。",
+                    due_in=2,
+                )
             self.db.conn.execute("UPDATE factions SET fear = fear + 8 WHERE id = 'old_party_clients'")
             result = f"裁断：{judgment}。转运判官伏罪，追银入库，禁军欠饷案初定；转运财税网络恐惧上升，也开始暗中抱团。"
             self.db.conn.execute("UPDATE court_cases SET status = 'judged', result = ? WHERE id = ?", (result, case_id))

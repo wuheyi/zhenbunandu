@@ -145,6 +145,24 @@ export type FactionClock = {
   last_delta: number;
 };
 
+export type FactionRetaliation = {
+  id: number;
+  clock_id: string;
+  faction_id: string;
+  title: string;
+  kind: string;
+  status: string;
+  pressure: number;
+  due_turn: number;
+  evidence_target: string;
+  linked_case: string;
+  summary: string;
+  action_hint: string;
+  result: string;
+  created_turn: number;
+  last_delta: number;
+};
+
 export type Region = {
   id: string;
   name: string;
@@ -381,6 +399,7 @@ export type GameState = {
   ministers: Minister[];
   factions: Faction[];
   faction_clocks: FactionClock[];
+  faction_retaliations: FactionRetaliation[];
   regions: Region[];
   armies: Army[];
   gates: Gate[];

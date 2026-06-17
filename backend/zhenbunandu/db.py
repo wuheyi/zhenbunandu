@@ -84,6 +84,24 @@ class GameDB:
                 last_delta INTEGER NOT NULL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS faction_retaliations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                clock_id TEXT NOT NULL,
+                faction_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                pressure INTEGER NOT NULL,
+                due_turn INTEGER NOT NULL,
+                evidence_target TEXT NOT NULL DEFAULT '',
+                linked_case TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL,
+                action_hint TEXT NOT NULL,
+                result TEXT NOT NULL DEFAULT '',
+                created_turn INTEGER NOT NULL,
+                last_delta INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS regions (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -380,6 +398,7 @@ class GameDB:
             "characters",
             "factions",
             "faction_clocks",
+            "faction_retaliations",
             "regions",
             "armies",
             "siege_state",
@@ -765,6 +784,55 @@ class GameDB:
             (next_value, self.clock_stage(next_value), next_value - current, clock_id),
         )
         return self.row("SELECT * FROM faction_clocks WHERE id = ?", (clock_id,))
+
+    def create_faction_retaliation(self, data: dict[str, Any]) -> dict[str, Any]:
+        state = self.row("SELECT turn FROM game_state WHERE id = 1") or {"turn": 1}
+        existing = self.row(
+            """SELECT * FROM faction_retaliations
+               WHERE clock_id = ? AND kind = ? AND status = 'active'
+               ORDER BY id DESC LIMIT 1""",
+            (data["clock_id"], data["kind"]),
+        )
+        if existing:
+            return existing
+        cur = self.conn.execute(
+            """INSERT INTO faction_retaliations
+               (clock_id, faction_id, title, kind, status, pressure, due_turn,
+                evidence_target, linked_case, summary, action_hint, created_turn)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["clock_id"],
+                data["faction_id"],
+                data["title"],
+                data["kind"],
+                data.get("status", "active"),
+                clamp(int(data.get("pressure", 50))),
+                int(data.get("due_turn", int(state["turn"]) + 2)),
+                data.get("evidence_target", ""),
+                data.get("linked_case", ""),
+                data.get("summary", ""),
+                data.get("action_hint", ""),
+                int(data.get("created_turn", int(state["turn"]))),
+            ),
+        )
+        return self.row("SELECT * FROM faction_retaliations WHERE id = ?", (cur.lastrowid,)) or {}
+
+    def change_faction_retaliation(self, retaliation_id: int, changes: dict[str, int | str]) -> dict[str, Any] | None:
+        row = self.row("SELECT * FROM faction_retaliations WHERE id = ?", (retaliation_id,))
+        if not row:
+            return None
+        next_values: dict[str, int | str] = {}
+        for key, delta in changes.items():
+            if isinstance(delta, int) and key == "pressure":
+                current = int(row[key])
+                next_values[key] = clamp(current + delta)
+                next_values["last_delta"] = int(next_values[key]) - current
+            else:
+                next_values[key] = delta
+        if next_values:
+            parts = ", ".join(f"{field} = ?" for field in next_values)
+            self.conn.execute(f"UPDATE faction_retaliations SET {parts} WHERE id = ?", [*next_values.values(), retaliation_id])
+        return self.row("SELECT * FROM faction_retaliations WHERE id = ?", (retaliation_id,))
 
     def upsert_event(self, item: dict[str, Any]) -> None:
         self.conn.execute(

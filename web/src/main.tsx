@@ -17,7 +17,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { Army, CourtCase, Directive, DiplomacyIncident, DiplomacyOption, DiplomacyTerm, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
+import type { Army, CourtCase, Directive, DiplomacyIncident, DiplomacyOption, DiplomacyTerm, EventItem, FactionClock, FactionRetaliation, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region, RouteNode } from "./types";
 import "./styles.css";
 
 type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater" | "diplomacy";
@@ -161,6 +161,22 @@ function App() {
     setError("");
     try {
       const data = await api<{ state: GameState }>(`/api/faction_clocks/${encodeURIComponent(clockId)}/mitigate`, {
+        method: "POST",
+        body: JSON.stringify({ action })
+      });
+      setState(data.state);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleRetaliationAction = async (retaliationId: number, action = "secure_evidence") => {
+    setBusy("处置反扑中...");
+    setError("");
+    try {
+      const data = await api<{ state: GameState }>(`/api/faction_retaliations/${retaliationId}/action`, {
         method: "POST",
         body: JSON.stringify({ action })
       });
@@ -413,6 +429,7 @@ function App() {
           onSelect={setSelectedMinisterId}
           onAudience={openAudience}
           onMitigateClock={handleMitigateClock}
+          onRetaliationAction={handleRetaliationAction}
           onClose={() => setModal("none")}
         />
       )}
@@ -1240,6 +1257,7 @@ function PeopleModal({
   onSelect,
   onAudience,
   onMitigateClock,
+  onRetaliationAction,
   onClose
 }: {
   state: GameState;
@@ -1248,6 +1266,7 @@ function PeopleModal({
   onSelect: (id: string) => void;
   onAudience: (id: string) => void;
   onMitigateClock: (clockId: string, action?: string) => Promise<void>;
+  onRetaliationAction: (retaliationId: number, action?: string) => Promise<void>;
   onClose: () => void;
 }) {
   const selected = state.ministers.find((minister) => minister.id === selectedId) || state.ministers[0];
@@ -1311,9 +1330,68 @@ function PeopleModal({
               <FactionClockCard key={clock.id} clock={clock} busy={busy} onMitigate={onMitigateClock} />
             ))}
           </div>
+          <FactionRetaliationsPanel retaliations={state.faction_retaliations || []} busy={busy} onAction={onRetaliationAction} />
         </section>
       </div>
     </Modal>
+  );
+}
+
+function FactionRetaliationsPanel({
+  retaliations,
+  busy,
+  onAction
+}: {
+  retaliations: FactionRetaliation[];
+  busy: string;
+  onAction: (retaliationId: number, action?: string) => Promise<void>;
+}) {
+  const visibleRetaliations = retaliations.slice(0, 4);
+  return (
+    <section className="retaliation-panel">
+      <div className="subhead-line">
+        <b>反扑事件</b>
+        <span>{retaliations.filter((item) => item.status === "active").length} 件待处置</span>
+      </div>
+      {visibleRetaliations.length ? visibleRetaliations.map((item) => (
+        <FactionRetaliationCard key={item.id} retaliation={item} busy={busy} onAction={onAction} />
+      )) : <p className="muted">暂无具体反扑。高阶段时钟会生成毁证、抱团或弹劾等可处置事件。</p>}
+    </section>
+  );
+}
+
+function FactionRetaliationCard({
+  retaliation,
+  busy,
+  onAction
+}: {
+  retaliation: FactionRetaliation;
+  busy: string;
+  onAction: (retaliationId: number, action?: string) => Promise<void>;
+}) {
+  return (
+    <article className={`retaliation-card ${retaliation.status}`}>
+      <div className="clock-head">
+        <div>
+          <b>{retaliation.title}</b>
+          <small>{retaliation.result || retaliation.summary}</small>
+        </div>
+        <span>{retaliation.pressure}</span>
+      </div>
+      <Progress value={retaliation.pressure} tone={valueTone(retaliation.pressure, true)} />
+      <div className="clock-meta">
+        <span>{retaliation.status === "active" ? `限第 ${retaliation.due_turn} 回合` : retaliation.status}</span>
+        <span>{retaliation.action_hint}</span>
+        {retaliation.evidence_target && <span>证据：{retaliation.evidence_target}</span>}
+      </div>
+      {retaliation.status === "active" && (
+        <div className="clock-actions">
+          <button disabled={!!busy} onClick={() => onAction(retaliation.id, "secure_evidence")}>护证</button>
+          <button disabled={!!busy} onClick={() => onAction(retaliation.id, "split_clique")}>分化</button>
+          <button disabled={!!busy} onClick={() => onAction(retaliation.id, "pressure")}>威慑</button>
+        </div>
+      )}
+    </article>
   );
 }
 

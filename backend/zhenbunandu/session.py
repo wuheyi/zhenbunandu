@@ -63,6 +63,7 @@ class GameSession:
         directives: list[dict[str, Any]],
         cases: list[dict[str, Any]],
         routes: list[dict[str, Any]],
+        clocks: list[dict[str, Any]],
     ) -> dict[str, Any]:
         metric_map = {item["key"]: int(item["value"]) for item in metrics}
         active_directives = [item for item in directives if item["status"] in {"draft", "confirmed"}]
@@ -183,6 +184,9 @@ class GameSession:
         stalled_route = next((route for route in routes if int(route.get("risk", 0)) >= 55 or int(route.get("eta", 0)) >= 4), None)
         if stalled_route:
             risk_flags.append(f"{stalled_route['name']}迟滞，需查账、护粮或补赏格。")
+        hot_clock = next((clock for clock in sorted(clocks, key=lambda item: int(item.get("value", 0)), reverse=True) if int(clock.get("stage", 0)) >= 2), None)
+        if hot_clock:
+            risk_flags.append(f"{hot_clock['title']}已成反扑链条，需在人物谱中缓和。")
 
         return {
             "stage": stage,
@@ -328,6 +332,8 @@ class GameSession:
     def state(self) -> dict[str, Any]:
         if not self.db.row("SELECT * FROM game_state WHERE id = 1"):
             self.new_game()
+        if not self.db.row("SELECT id FROM faction_clocks LIMIT 1"):
+            self.db.seed_faction_clocks()
         game = self.db.row("SELECT * FROM game_state WHERE id = 1") or {}
         metrics = self.db.rows("SELECT key, value, last_delta FROM metrics ORDER BY rowid")
         siege = self.db.row("SELECT * FROM siege_state WHERE id = 1") or {}
@@ -365,7 +371,8 @@ class GameSession:
         directives = self.db.rows("SELECT * FROM directives ORDER BY id")
         issues = self.db.rows("SELECT * FROM issues ORDER BY rowid")
         routes = self.db.rows("SELECT * FROM logistics_routes ORDER BY rowid")
-        guidance = self._build_guidance(game, metrics, siege, events, directives, cases, routes)
+        clocks = self.db.rows("SELECT * FROM faction_clocks ORDER BY value DESC, rowid")
+        guidance = self._build_guidance(game, metrics, siege, events, directives, cases, routes, clocks)
         postmortem = self._build_postmortem(game, metrics, siege, issues, routes)
         return {
             "game": game,
@@ -376,6 +383,7 @@ class GameSession:
             "issues": issues,
             "ministers": self.db.rows("SELECT * FROM characters ORDER BY rowid"),
             "factions": self.db.rows("SELECT * FROM factions ORDER BY rowid"),
+            "faction_clocks": clocks,
             "regions": self.db.rows("SELECT * FROM regions ORDER BY rowid"),
             "armies": self.db.rows("SELECT * FROM armies ORDER BY rowid"),
             "gates": self.db.rows("SELECT * FROM city_gates ORDER BY rowid"),
@@ -752,6 +760,224 @@ class GameSession:
             self.db.conn.execute("UPDATE game_state SET ended = 1, ending = ?, phase = '结局' WHERE id = 1", (ending,))
         return ending
 
+    def _record_ledger(
+        self,
+        turn: int,
+        account: str,
+        delta: int,
+        category: str,
+        reason: str,
+        source: str,
+        visibility: str = "公开",
+    ) -> int:
+        balance = self.db.change_metric(account, delta, high=999)
+        self.db.conn.execute(
+            """INSERT INTO economy_ledger
+               (turn, account, delta, balance_after, category, reason, source, visibility)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (turn, account, delta, balance, category, reason, source, visibility),
+        )
+        return balance
+
+    def _apply_faction_clocks(
+        self,
+        metric_deltas: dict[str, int],
+        siege_deltas: dict[str, int],
+        timeline: list[str],
+    ) -> list[str]:
+        warnings: list[str] = []
+        clocks = self.db.rows("SELECT * FROM faction_clocks WHERE status = 'active' ORDER BY value DESC")
+        for clock in clocks:
+            stage = int(clock.get("stage", 0))
+            if stage <= 0:
+                continue
+            clock_id = clock["id"]
+            if clock_id == "transport_slowdown":
+                self.db.change_route(
+                    "jianghuai_grain_to_bianjing",
+                    {"risk": stage + 1, "corruption": stage, "eta": 1 if stage >= 3 else 0},
+                )
+                if stage >= 2:
+                    metric_deltas["京城粮"] = metric_deltas.get("京城粮", 0) - 1
+                    timeline.append("转运财税网络开始怠工，江淮粮船报称水程、账册皆有阻滞。")
+                if stage >= 3:
+                    warnings.append("转运怠工已拖慢粮道，下月宜护粮、查账或保价催运。")
+                    self.db.upsert_event(
+                        {
+                            "id": "clock_transport_slowdown",
+                            "title": "转运怠工成势",
+                            "kind": "暗潮",
+                            "summary": "转运节点互相推诿，粮船脚价、账册和护送都成了拖延借口。",
+                            "urgency": 78,
+                            "severity": 72,
+                            "credibility": 70,
+                            "interests": ["转运财税网络", "粮道", "户部"],
+                            "audiences": ["户部尚书", "转运判官"],
+                            "actions": ["查账问责", "派兵护粮", "保价催运"],
+                            "status": "active",
+                            "read": 0,
+                            "focus": 1,
+                        }
+                    )
+            elif clock_id == "western_army_grievance":
+                self.db.change_route("shaanxi_relief_army", {"risk": stage + 2, "eta": 1 if stage >= 3 else 0, "current_load": -1})
+                if stage >= 2:
+                    siege_deltas["qinwang_response"] = siege_deltas.get("qinwang_response", 0) - 3
+                    timeline.append("陕西西军因赏格未实而观望，勤王路线又迟一线。")
+                if stage >= 3:
+                    warnings.append("西军怨望升高，勤王响应会继续被拖慢。")
+            elif clock_id == "southern_flight_talk":
+                if stage >= 2:
+                    siege_deltas["peace_pressure"] = siege_deltas.get("peace_pressure", 0) + 3
+                    metric_deltas["君威"] = metric_deltas.get("君威", 0) - 1
+                    timeline.append("内廷南迁暗议外泄，主和压力随之上升。")
+                if stage >= 3:
+                    warnings.append("南迁暗议逼近失控，需用城防胜算和内廷安抚压住。")
+            elif clock_id == "li_gang_removal":
+                if stage >= 2:
+                    siege_deltas["peace_pressure"] = siege_deltas.get("peace_pressure", 0) + 2
+                    timeline.append("主和派借李纲专权之名弹劾，守城指挥承压。")
+                if stage >= 3:
+                    warnings.append("罢李纲风波已成案，守城体系可能被朝争摇动。")
+            elif clock_id == "grain_market_strike":
+                if stage >= 2:
+                    siege_deltas["grain_price"] = siege_deltas.get("grain_price", 0) + 7
+                    metric_deltas["民心"] = metric_deltas.get("民心", 0) - 1
+                    timeline.append("粮行观望闭市，坊市米价再起波澜。")
+                if stage >= 3:
+                    warnings.append("粮行罢市会推高粮价，需保价、护商并限价平粜。")
+        return warnings
+
+    def route_action(self, route_id: str, action: str = "escort") -> dict[str, Any]:
+        route = self.db.row("SELECT * FROM logistics_routes WHERE id = ?", (route_id,))
+        if not route:
+            raise KeyError("未找到此路线。")
+        game = self.db.row("SELECT * FROM game_state WHERE id = 1") or {"turn": 1}
+        turn = int(game.get("turn", 1))
+        action = action or "escort"
+        with self.db.conn:
+            if action == "escort":
+                self._record_ledger(turn, "国库", -2, "路线行动", f"派兵护送{route['name']}", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -8, "escort": 14, "status": "护送"})
+                if route_id == "jianghuai_grain_to_bianjing":
+                    self.db.change_siege("grain_price", -4, high=300)
+                    self.db.change_faction_clock("grain_market_strike", -4)
+                result = "已派兵护送，路线风险下降，但国库添了一笔护送开销。"
+            elif action == "audit":
+                updated = self.db.change_route(route_id, {"risk": 2, "corruption": -10, "status": "查账"})
+                self.db.change_faction_clock("transport_slowdown", 8)
+                result = "已点名查账，截留会收敛，转运网络也会记下这笔账。"
+            elif action == "subsidy":
+                self._record_ledger(turn, "国库", -4, "路线行动", f"给付{route['name']}脚价与保价", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -5, "corruption": -4, "current_load": 6, "status": "保价催运"})
+                self.db.change_faction_clock("grain_market_strike", -8)
+                self.db.change_faction_clock("transport_slowdown", -4)
+                self.db.change_siege("grain_price", -6, high=300)
+                result = "脚价和保价落定，粮商愿意出船，粮价压力小退。"
+            elif action == "reroute":
+                self._record_ledger(turn, "国库", -1, "路线行动", f"{route['name']}临时改道", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -10, "eta": 1, "current_load": -1, "status": "改道"})
+                result = "路线改道避开最险节点，但到达时间会被拉长。"
+            elif action == "reward":
+                if route_id != "shaanxi_relief_army":
+                    raise ValueError("加赏催援只适用于勤王路线。")
+                self._record_ledger(turn, "国库", -5, "勤王赏格", "兑现西军入援赏格", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -6, "eta": -1, "current_load": 10, "escort": 6, "status": "加赏集结"})
+                self.db.change_siege("qinwang_response", 8)
+                self.db.change_issue("qinwang_call", 8)
+                self.db.change_faction_clock("western_army_grievance", -12)
+                result = "赏格写清且先拨一批，西军集结更实，勤王响应上升。"
+            elif action == "envoy":
+                if route_id != "shaanxi_relief_army":
+                    raise ValueError("遣使催促只适用于勤王路线。")
+                self._record_ledger(turn, "国库", -1, "勤王使费", "遣中使催促西军行营", "战区路线")
+                updated = self.db.change_route(route_id, {"risk": -3, "eta": -1, "status": "中使催促"})
+                self.db.change_siege("qinwang_response", 4)
+                self.db.change_issue("qinwang_call", 4)
+                self.db.change_faction_clock("western_army_grievance", -5)
+                result = "中使持诏催促，勤王路线略有提速。"
+            else:
+                raise ValueError("未知路线行动。")
+            self.db.conn.execute(
+                """INSERT INTO memories
+                   (subject_type, subject_id, turn, title, cause, process, outcome, sentiment, importance, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "route",
+                    route_id,
+                    turn,
+                    f"{route['name']}路线处置",
+                    "围城压力使粮道与勤王路线成为要害。",
+                    f"皇帝选择路线行动：{action}。",
+                    result,
+                    "positive",
+                    3,
+                    json.dumps(["路线行动", route["name"]], ensure_ascii=False),
+                ),
+            )
+        return {"route": updated, "result": result, "state": self.state()}
+
+    def mitigate_faction_clock(self, clock_id: str, action: str = "appease") -> dict[str, Any]:
+        clock = self.db.row("SELECT * FROM faction_clocks WHERE id = ?", (clock_id,))
+        if not clock:
+            raise KeyError("未找到此反扑时钟。")
+        game = self.db.row("SELECT * FROM game_state WHERE id = 1") or {"turn": 1}
+        turn = int(game.get("turn", 1))
+        with self.db.conn:
+            if clock_id == "transport_slowdown":
+                self._record_ledger(turn, "国库", -3, "派系缓和", "给付转运脚价并核关键节点", "人物谱")
+                self.db.change_route("jianghuai_grain_to_bianjing", {"risk": -4, "corruption": -2, "status": "缓和转运"})
+                next_clock = self.db.change_faction_clock(clock_id, -12)
+                result = "脚价与问责并行，转运怠工暂被压住。"
+            elif clock_id == "western_army_grievance":
+                self._record_ledger(turn, "国库", -4, "派系缓和", "预支西军赏格与军粮承诺", "人物谱")
+                self.db.change_route("shaanxi_relief_army", {"eta": -1, "current_load": 4, "status": "安抚西军"})
+                self.db.change_siege("qinwang_response", 5)
+                next_clock = self.db.change_faction_clock(clock_id, -12)
+                result = "赏格先落一半，西军怨望回落。"
+            elif clock_id == "grain_market_strike":
+                self._record_ledger(turn, "国库", -2, "派系缓和", "保价收粮并护正常商户", "人物谱")
+                self.db.change_siege("grain_price", -8, high=300)
+                next_clock = self.db.change_faction_clock(clock_id, -10)
+                result = "保价和护商令粮行愿意开市，粮价压力下降。"
+            elif clock_id == "southern_flight_talk":
+                self.db.change_metric("君威", 1)
+                self.db.change_siege("peace_pressure", -5)
+                next_clock = self.db.change_faction_clock(clock_id, -9)
+                result = "召宗室入宫明示守城章程，南迁暗议暂退。"
+            elif clock_id == "li_gang_removal":
+                self.db.change_metric("君威", 1)
+                self.db.change_siege("peace_pressure", -4)
+                next_clock = self.db.change_faction_clock(clock_id, -9)
+                result = "以战报和期限约束李纲权责，弹劾声势暂缓。"
+            else:
+                next_clock = self.db.change_faction_clock(clock_id, -8)
+                result = "已安抚关键人等，反扑声量下降。"
+            if action == "pressure":
+                self.db.conn.execute("UPDATE factions SET fear = fear + 3, backlash = backlash + 2 WHERE id = ?", (clock["faction_id"],))
+            elif action == "expose":
+                self.db.conn.execute("UPDATE factions SET fear = fear + 2, affinity = affinity - 1 WHERE id = ?", (clock["faction_id"],))
+            else:
+                self.db.conn.execute("UPDATE factions SET affinity = affinity + 2, fear = CASE WHEN fear >= 1 THEN fear - 1 ELSE fear END WHERE id = ?", (clock["faction_id"],))
+            self.db.conn.execute(
+                """INSERT INTO memories
+                   (subject_type, subject_id, turn, title, cause, process, outcome, sentiment, importance, tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "faction_clock",
+                    clock_id,
+                    turn,
+                    f"{clock['title']}缓和",
+                    clock["trigger"],
+                    f"皇帝采取{action}处置。",
+                    result,
+                    "mixed",
+                    3,
+                    json.dumps(["反扑时钟", clock["title"]], ensure_ascii=False),
+                ),
+            )
+        return {"clock": next_clock, "result": result, "state": self.state()}
+
     def resolve_turn(self) -> dict[str, Any]:
         state = self.db.row("SELECT * FROM game_state WHERE id = 1") or {}
         turn = int(state.get("turn", 1))
@@ -763,6 +989,7 @@ class GameSession:
         diplomacy_deltas: dict[str, int] = {"impatience": 5}
         timeline: list[str] = ["金军前锋逼近黄河，河北溃报入京。"]
         directive_results: list[dict[str, str]] = []
+        clock_warnings: list[str] = []
         with self.db.conn:
             for directive in directives:
                 title = directive["title"]
@@ -772,6 +999,7 @@ class GameSession:
                     siege_deltas["defender_will"] = siege_deltas.get("defender_will", 0) + 6
                     metric_deltas["君威"] = metric_deltas.get("君威", 0) + 3
                     self.db.change_issue("defend_bianjing", 10)
+                    self.db.change_faction_clock("li_gang_removal", 7)
                     self.db.conn.execute("UPDATE city_gates SET condition = condition + 10, commander = '李纲', equipment = equipment + 8, status = '稍安' WHERE id = 'xuanhua_gate'")
                     result = "李纲亲至宣化门，工部料物不足仍先修城楼，殿前司夜值稍肃。"
                     timeline.append("宣化门守备稍稳，李纲受主战清议拥戴。")
@@ -787,6 +1015,8 @@ class GameSession:
                     metric_deltas["民心"] = metric_deltas.get("民心", 0) + 2
                     siege_deltas["defender_will"] = siege_deltas.get("defender_will", 0) + 4
                     self.db.change_issue("discipline_guards", 8)
+                    self.db.change_faction_clock("transport_slowdown", 4)
+                    self.db.change_faction_clock("southern_flight_talk", 3)
                     result = "内帑如数拨出，户部先发一半，开封府核验营册时发现发放旧账不清。"
                     timeline.append("禁军鼓噪暂息，但军饷去向暴露疑点。")
                 if "夜值" in title or "城门" in title or "排查" in title:
@@ -801,6 +1031,7 @@ class GameSession:
                     siege_deltas["jin_pressure"] = siege_deltas.get("jin_pressure", 0) - 2
                     self.db.change_issue("qinwang_call", 18)
                     self.db.change_route("shaanxi_relief_army", {"status": "集结", "eta": -1, "escort": 8, "current_load": 12})
+                    self.db.change_faction_clock("western_army_grievance", -9)
                     result = "手诏传至陕西，种师道部开始集结；但赏格和军粮仍须兑现，否则行军会迟。"
                     timeline.append("西军由观望转入集结，勤王响应上升。")
                 if "粮" in title or "平粜" in title or "开仓" in title:
@@ -809,6 +1040,8 @@ class GameSession:
                     siege_deltas["grain_price"] = siege_deltas.get("grain_price", 0) - 22
                     siege_deltas["defender_will"] = siege_deltas.get("defender_will", 0) + 3
                     self.db.change_route("jianghuai_grain_to_bianjing", {"risk": -5, "current_load": 4, "status": "催运"})
+                    self.db.change_faction_clock("grain_market_strike", 6)
+                    self.db.change_faction_clock("transport_slowdown", 4)
                     result = "开封府开仓平粜，米价暂缓；江淮粮道被催，但转运网络索要护粮与脚价。"
                     timeline.append("京城粮价稍稳，坊市民心回升。")
                 if "议和" in title or "国书" in title or "金营" in title:
@@ -819,6 +1052,8 @@ class GameSession:
                     diplomacy_deltas["leverage"] = diplomacy_deltas.get("leverage", 0) + 3
                     diplomacy_deltas["impatience"] = diplomacy_deltas.get("impatience", 0) - 7
                     self.db.set_diplomacy_text(status="拖延谈判")
+                    self.db.change_faction_clock("southern_flight_talk", 5)
+                    self.db.change_faction_clock("li_gang_removal", 3)
                     result = "国书送至金营，争得数日缓冲；主战清议疑其开割地之门。"
                 self.db.conn.execute("UPDATE directives SET status = 'issued', result_summary = ? WHERE id = ?", (result, directive["id"]))
                 directive_results.append({"title": title, "result": result})
@@ -826,8 +1061,12 @@ class GameSession:
             if not any("勤王" in item["title"] or "西军" in item["title"] for item in directives):
                 self.db.change_route("shaanxi_relief_army", {"eta": 1, "risk": 4})
                 self.db.change_issue("qinwang_call", -4)
+                self.db.change_faction_clock("western_army_grievance", 5)
             if not any("粮" in item["title"] or "平粜" in item["title"] or "开仓" in item["title"] for item in directives):
                 self.db.change_route("jianghuai_grain_to_bianjing", {"risk": 3, "corruption": 2, "eta": 1})
+                self.db.change_faction_clock("transport_slowdown", 3)
+                self.db.change_faction_clock("grain_market_strike", 4)
+            clock_warnings = self._apply_faction_clocks(metric_deltas, siege_deltas, timeline)
             self._resolve_night_attack(turn, metric_deltas, siege_deltas, timeline)
             for key, delta in metric_deltas.items():
                 if delta:
@@ -884,6 +1123,7 @@ class GameSession:
                 "东仓副册可支撑殿前对质，但会触动转运财税网络。",
                 "粮价仍涨，若不开仓调粮，民心将受损。",
             ]
+            warnings.extend(clock_warnings[:2])
             if self.db.row("SELECT * FROM battle_reports WHERE turn = ?", (turn,)):
                 warnings.insert(0, "宣化门夜攻战报已入史册，下一步应补城防损耗。")
             if not ending:
@@ -955,6 +1195,7 @@ class GameSession:
                 "UPDATE factions SET fear = ?, backlash = ?, affinity = ? WHERE id = 'transport_tax_network'",
                 (clamp(14 + 24), clamp(42 + 9), clamp(35 - 8)),
             )
+            self.db.change_faction_clock("transport_slowdown", 15)
             self.db.conn.execute("UPDATE factions SET fear = fear + 8 WHERE id = 'old_party_clients'")
             result = f"裁断：{judgment}。转运判官伏罪，追银入库，禁军欠饷案初定；转运财税网络恐惧上升，也开始暗中抱团。"
             self.db.conn.execute("UPDATE court_cases SET status = 'judged', result = ? WHERE id = ?", (result, case_id))

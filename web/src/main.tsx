@@ -17,7 +17,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { Army, CourtCase, Directive, EventItem, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region } from "./types";
+import type { Army, CourtCase, Directive, EventItem, FactionClock, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region } from "./types";
 import "./styles.css";
 
 type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater";
@@ -139,6 +139,38 @@ function App() {
     setMapMode(focus.mode);
     setSelectedNode(focus.node);
   }, []);
+
+  const handleRouteAction = async (routeId: string, action: string) => {
+    setBusy("路线处置中...");
+    setError("");
+    try {
+      const data = await api<{ state: GameState }>(`/api/routes/${encodeURIComponent(routeId)}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action })
+      });
+      setState(data.state);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleMitigateClock = async (clockId: string, action = "appease") => {
+    setBusy("缓和派系中...");
+    setError("");
+    try {
+      const data = await api<{ state: GameState }>(`/api/faction_clocks/${encodeURIComponent(clockId)}/mitigate`, {
+        method: "POST",
+        body: JSON.stringify({ action })
+      });
+      setState(data.state);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  };
 
   if (!state) {
     return (
@@ -357,7 +389,15 @@ function App() {
       )}
 
       {modal === "people" && (
-        <PeopleModal state={state} selectedId={selectedMinisterId} onSelect={setSelectedMinisterId} onAudience={openAudience} onClose={() => setModal("none")} />
+        <PeopleModal
+          state={state}
+          selectedId={selectedMinisterId}
+          busy={busy}
+          onSelect={setSelectedMinisterId}
+          onAudience={openAudience}
+          onMitigateClock={handleMitigateClock}
+          onClose={() => setModal("none")}
+        />
       )}
 
       {modal === "ledger" && (
@@ -365,7 +405,7 @@ function App() {
       )}
 
       {modal === "theater" && (
-        <TheaterModal state={state} onClose={() => setModal("none")} />
+        <TheaterModal state={state} busy={busy} onRouteAction={handleRouteAction} onClose={() => setModal("none")} />
       )}
 
       {modal === "llm" && (
@@ -864,6 +904,7 @@ function DecreeModal({ state, busy, settleLog, onClose, onState, onIssue }: { st
 function WarPulsePanel({ state }: { state: GameState }) {
   const diplomacy = state.diplomacy || { status: "未接触", demand_severity: 0, impatience: 0 };
   const routes = state.logistics_routes || [];
+  const hotClock = [...(state.faction_clocks || [])].sort((a, b) => b.value - a.value)[0];
   const latestBattle = (state.battle_reports || [])[0];
   const urgentRoute = routes.find((route) => route.risk >= 45) || routes[0];
   return (
@@ -879,6 +920,11 @@ function WarPulsePanel({ state }: { state: GameState }) {
           <span>粮运焦点</span>
           <b>{urgentRoute?.name || "未设路线"}</b>
           <small>{urgentRoute ? `${urgentRoute.status} · 风险 ${urgentRoute.risk}` : "暂无"}</small>
+        </div>
+        <div>
+          <span>派系反扑</span>
+          <b>{hotClock?.title || "暂稳"}</b>
+          <small>{hotClock ? `时钟 ${hotClock.value} · 阶段 ${hotClock.stage}` : "暂无"}</small>
         </div>
       </div>
       {latestBattle ? (
@@ -1044,14 +1090,18 @@ function HistoryModal({ state, onClose }: { state: GameState; onClose: () => voi
 function PeopleModal({
   state,
   selectedId,
+  busy,
   onSelect,
   onAudience,
+  onMitigateClock,
   onClose
 }: {
   state: GameState;
   selectedId: string;
+  busy: string;
   onSelect: (id: string) => void;
   onAudience: (id: string) => void;
+  onMitigateClock: (clockId: string, action?: string) => Promise<void>;
   onClose: () => void;
 }) {
   const selected = state.ministers.find((minister) => minister.id === selectedId) || state.ministers[0];
@@ -1110,9 +1160,45 @@ function PeopleModal({
               ))}
             </div>
           </div>
+          <div className="clock-list">
+            {state.faction_clocks.map((clock) => (
+              <FactionClockCard key={clock.id} clock={clock} busy={busy} onMitigate={onMitigateClock} />
+            ))}
+          </div>
         </section>
       </div>
     </Modal>
+  );
+}
+
+function FactionClockCard({
+  clock,
+  busy,
+  onMitigate
+}: {
+  clock: FactionClock;
+  busy: string;
+  onMitigate: (clockId: string, action?: string) => Promise<void>;
+}) {
+  return (
+    <article className={`clock-card stage-${Math.min(clock.stage, 5)}`}>
+      <div className="clock-head">
+        <div>
+          <b>{clock.title}</b>
+          <small>{clock.effect}</small>
+        </div>
+        <span>{clock.value}</span>
+      </div>
+      <Progress value={clock.value} tone={valueTone(clock.value, true)} />
+      <div className="clock-meta">
+        <span>阶段 {clock.stage}</span>
+        <span>{clock.trigger}</span>
+      </div>
+      <div className="clock-actions">
+        <button disabled={!!busy} onClick={() => onMitigate(clock.id, "appease")}>安抚</button>
+        <button disabled={!!busy} onClick={() => onMitigate(clock.id, "expose")}>揭示</button>
+      </div>
+    </article>
   );
 }
 
@@ -1171,7 +1257,17 @@ function LedgerModal({ state, onClose }: { state: GameState; onClose: () => void
   );
 }
 
-function TheaterModal({ state, onClose }: { state: GameState; onClose: () => void }) {
+function TheaterModal({
+  state,
+  busy,
+  onRouteAction,
+  onClose
+}: {
+  state: GameState;
+  busy: string;
+  onRouteAction: (routeId: string, action: string) => Promise<void>;
+  onClose: () => void;
+}) {
   const [tab, setTab] = React.useState<"regions" | "armies" | "gates" | "routes">("regions");
   return (
     <Modal title="地区与军队详情" onClose={onClose} wide>
@@ -1198,7 +1294,9 @@ function TheaterModal({ state, onClose }: { state: GameState; onClose: () => voi
       )}
       {tab === "routes" && (
         <div className="detail-grid">
-          {state.logistics_routes.map((route) => <RouteDetailCard key={route.id} route={route} />)}
+          {state.logistics_routes.map((route) => (
+            <RouteDetailCard key={route.id} route={route} busy={busy} onAction={onRouteAction} />
+          ))}
         </div>
       )}
     </Modal>
@@ -1247,7 +1345,27 @@ function GateDetailCard({ gate }: { gate: Gate }) {
   );
 }
 
-function RouteDetailCard({ route }: { route: LogisticsRoute }) {
+function RouteDetailCard({
+  route,
+  busy,
+  onAction
+}: {
+  route: LogisticsRoute;
+  busy: string;
+  onAction: (routeId: string, action: string) => Promise<void>;
+}) {
+  const commonActions = [
+    ["escort", "护送"],
+    ["audit", "查账"],
+    ["subsidy", "保价"],
+    ["reroute", "改道"]
+  ];
+  const reliefActions = [
+    ["reward", "加赏"],
+    ["envoy", "遣使"],
+    ["reroute", "改道"]
+  ];
+  const actions = route.id === "shaanxi_relief_army" ? reliefActions : commonActions;
   return (
     <article className="detail-card">
       <h3>{route.name}</h3>
@@ -1256,6 +1374,11 @@ function RouteDetailCard({ route }: { route: LogisticsRoute }) {
       <MetricLine label="风险" value={route.risk} dangerHigh />
       <MetricLine label="截留" value={route.corruption} dangerHigh />
       <MetricLine label="护送" value={route.escort} />
+      <div className="route-actions">
+        {actions.map(([action, label]) => (
+          <button key={action} disabled={!!busy} onClick={() => onAction(route.id, action)}>{label}</button>
+        ))}
+      </div>
     </article>
   );
 }

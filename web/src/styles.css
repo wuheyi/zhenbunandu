@@ -1212,6 +1212,91 @@ input {
   font-size: 12px;
 }
 
+.clock-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.clock-card {
+  min-height: 170px;
+  padding: 12px;
+  background: rgba(216, 196, 154, .2);
+  border: 1px solid rgba(58, 48, 38, .16);
+}
+
+.clock-card.stage-2,
+.clock-card.stage-3 {
+  border-color: rgba(181, 111, 41, .42);
+}
+
+.clock-card.stage-4,
+.clock-card.stage-5 {
+  border-color: rgba(167, 52, 43, .5);
+  background: rgba(167, 52, 43, .08);
+}
+
+.clock-head {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 10px;
+  align-items: start;
+}
+
+.clock-head b,
+.clock-head small {
+  display: block;
+}
+
+.clock-head small {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.clock-head span {
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 248, 232, .8);
+  border: 1px solid rgba(58, 48, 38, .16);
+  font-weight: 900;
+  color: var(--danger);
+}
+
+.clock-meta {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.clock-actions,
+.route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.clock-actions button,
+.route-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--ink);
+  background: rgba(255, 248, 232, .78);
+  border: 1px solid rgba(58, 48, 38, .2);
+}
+
+.clock-actions button:hover,
+.route-actions button:hover {
+  border-color: rgba(167, 52, 43, .42);
+  background: rgba(255, 248, 232, .95);
+}
+
 .resource-ledger {
   display: grid;
   align-content: start;
@@ -1306,6 +1391,10 @@ input {
 
 .detail-card h3 {
   margin: 0 0 6px;
+}
+
+.route-actions button {
+  flex: 1 1 78px;
 }
 
 .metric-line {
@@ -1443,6 +1532,7 @@ input {
   .postmortem-grid,
   .people-layout,
   .relation-grid,
+  .clock-list,
   .ledger-layout,
   .detail-grid {
     grid-template-columns: 1fr;

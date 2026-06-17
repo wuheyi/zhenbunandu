@@ -64,6 +64,14 @@ class DebateRequest(BaseModel):
     topic: str = "战和与勤王"
 
 
+class RouteActionRequest(BaseModel):
+    action: str = "escort"
+
+
+class ClockMitigationRequest(BaseModel):
+    action: str = "appease"
+
+
 def api_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail={"message": str(exc)})
 
@@ -170,6 +178,22 @@ def court_cases() -> dict[str, Any]:
 def court_case_judgment(case_id: str, request: JudgmentRequest) -> dict[str, Any]:
     try:
         return session.judge_case(case_id, request.judgment)
+    except Exception as exc:
+        raise api_error(exc) from exc
+
+
+@app.post("/api/routes/{route_id}/action")
+def logistics_route_action(route_id: str, request: RouteActionRequest) -> dict[str, Any]:
+    try:
+        return session.route_action(route_id, request.action)
+    except Exception as exc:
+        raise api_error(exc) from exc
+
+
+@app.post("/api/faction_clocks/{clock_id}/mitigate")
+def faction_clock_mitigation(clock_id: str, request: ClockMitigationRequest) -> dict[str, Any]:
+    try:
+        return session.mitigate_faction_clock(clock_id, request.action)
     except Exception as exc:
         raise api_error(exc) from exc
 

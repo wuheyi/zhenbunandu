@@ -29,6 +29,7 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert len(state["events"]) >= 3
     assert any(minister["id"] == "li_gang" for minister in state["ministers"])
     assert len(state["logistics_routes"]) == 3
+    assert len(state["faction_clocks"]) >= 5
     assert state["diplomacy"]["status"] == "未接触"
     assert state["guidance"]["stage"] == "初登大宝"
     assert any(tip["target"] == "minister:li_gang" for tip in state["guidance"]["tips"])
@@ -73,6 +74,27 @@ def test_debate_creates_strategy_drafts_and_anchor_events(tmp_path: Path) -> Non
     assert resolved["diplomacy"]["status"] == "金使入城"
 
 
+def test_route_actions_and_faction_clocks_update_state(tmp_path: Path) -> None:
+    game = make_session(tmp_path)
+    initial_state = game.state()
+    initial_route = next(route for route in initial_state["logistics_routes"] if route["id"] == "jianghuai_grain_to_bianjing")
+    escorted = game.route_action("jianghuai_grain_to_bianjing", "escort")["state"]
+    escorted_route = next(route for route in escorted["logistics_routes"] if route["id"] == "jianghuai_grain_to_bianjing")
+    assert escorted_route["risk"] < initial_route["risk"]
+    assert escorted_route["escort"] > initial_route["escort"]
+    assert escorted["ledger"][0]["category"] == "路线行动"
+
+    rewarded = game.route_action("shaanxi_relief_army", "reward")["state"]
+    assert rewarded["siege"]["qinwang_response"] > escorted["siege"]["qinwang_response"]
+    western_clock = next(clock for clock in rewarded["faction_clocks"] if clock["id"] == "western_army_grievance")
+    assert western_clock["value"] < 22
+
+    before_clock = next(clock for clock in rewarded["faction_clocks"] if clock["id"] == "transport_slowdown")
+    mitigated = game.mitigate_faction_clock("transport_slowdown", "appease")["state"]
+    after_clock = next(clock for clock in mitigated["faction_clocks"] if clock["id"] == "transport_slowdown")
+    assert after_clock["value"] < before_clock["value"]
+
+
 def test_second_turn_can_generate_night_attack_report(tmp_path: Path) -> None:
     game = make_session(tmp_path)
     game.minister_chat("li_gang", "守城")
@@ -100,6 +122,17 @@ def test_api_court_debate_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["state"]["court_debates"][0]["topic"] == "战和与勤王"
+
+
+def test_api_route_action_and_clock_mitigation_endpoints() -> None:
+    api_session.new_game()
+    client = TestClient(app)
+    route_response = client.post("/api/routes/jianghuai_grain_to_bianjing/action", json={"action": "subsidy"})
+    assert route_response.status_code == 200
+    assert route_response.json()["state"]["logistics_routes"][0]["status"] == "保价催运"
+    clock_response = client.post("/api/faction_clocks/grain_market_strike/mitigate", json={"action": "appease"})
+    assert clock_response.status_code == 200
+    assert next(clock for clock in clock_response.json()["state"]["faction_clocks"] if clock["id"] == "grain_market_strike")["value"] <= 4
 
 
 def test_llm_without_key_uses_fallback(tmp_path: Path) -> None:

@@ -71,6 +71,19 @@ class GameDB:
                 summary TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS faction_clocks (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                faction_id TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                stage INTEGER NOT NULL,
+                trigger TEXT NOT NULL,
+                effect TEXT NOT NULL,
+                mitigation TEXT NOT NULL,
+                status TEXT NOT NULL,
+                last_delta INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS regions (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -316,6 +329,7 @@ class GameDB:
             "metrics",
             "characters",
             "factions",
+            "faction_clocks",
             "regions",
             "armies",
             "siege_state",
@@ -394,6 +408,7 @@ class GameDB:
                        VALUES (:id, :name, :influence, :affinity, :damage, :backlash, :fear, :summary)""",
                     item,
                 )
+            self.seed_faction_clocks()
             for item in content.regions:
                 self.conn.execute(
                     """INSERT INTO regions
@@ -500,6 +515,94 @@ class GameDB:
         next_value = max(-100, min(100, current + int(delta)))
         self.conn.execute("UPDATE issues SET value = ? WHERE id = ?", (next_value, issue_id))
         return next_value
+
+    def clock_stage(self, value: int) -> int:
+        if value >= 85:
+            return 5
+        if value >= 70:
+            return 4
+        if value >= 55:
+            return 3
+        if value >= 40:
+            return 2
+        if value >= 20:
+            return 1
+        return 0
+
+    def seed_faction_clocks(self) -> None:
+        clocks = [
+            {
+                "id": "li_gang_removal",
+                "title": "罢李纲风波",
+                "faction_id": "peace_party",
+                "value": 18,
+                "trigger": "任李纲过权、守城扰民、战事受挫",
+                "effect": "弹劾主战重臣，迫使城防指挥摇摆",
+                "mitigation": "公开战报与城防成果，限制主和派借题发挥",
+            },
+            {
+                "id": "transport_slowdown",
+                "title": "转运怠工",
+                "faction_id": "transport_tax_network",
+                "value": 26,
+                "trigger": "查账、追赃、低价征粮、开仓平粜",
+                "effect": "粮船迟滞、军饷缩水、账册缺页",
+                "mitigation": "给脚价、护粮并点名问责关键节点",
+            },
+            {
+                "id": "southern_flight_talk",
+                "title": "南迁暗议",
+                "faction_id": "inner_court",
+                "value": 16,
+                "trigger": "金军威压、粮价、城防低、宗室恐惧",
+                "effect": "宗室内廷逼宫，君威下降，主和压力上升",
+                "mitigation": "稳城防、安内廷、公开守城胜算",
+            },
+            {
+                "id": "western_army_grievance",
+                "title": "西军怨望",
+                "faction_id": "war_party",
+                "value": 22,
+                "trigger": "空头赏格、欠饷、文臣掣肘、路线受阻",
+                "effect": "勤王迟缓，援军观望或绕路",
+                "mitigation": "兑现赏格、派使催促、调粮接应",
+            },
+            {
+                "id": "grain_market_strike",
+                "title": "粮行罢市",
+                "faction_id": "capital_people",
+                "value": 14,
+                "trigger": "强买、滥抄、赖账、粮价恐慌",
+                "effect": "粮价暴涨，坊市冲突，民心下降",
+                "mitigation": "保价收粮、平粜限价并保护正常商户",
+            },
+        ]
+        with self.conn:
+            for clock in clocks:
+                value = int(clock["value"])
+                self.conn.execute(
+                    """INSERT INTO faction_clocks
+                       (id, title, faction_id, value, stage, trigger, effect, mitigation, status)
+                       VALUES (:id, :title, :faction_id, :value, :stage, :trigger, :effect, :mitigation, :status)
+                       ON CONFLICT(id) DO NOTHING""",
+                    {
+                        **clock,
+                        "stage": self.clock_stage(value),
+                        "status": "active",
+                    },
+                )
+
+    def change_faction_clock(self, clock_id: str, delta: int) -> dict[str, Any] | None:
+        row = self.row("SELECT * FROM faction_clocks WHERE id = ?", (clock_id,))
+        if not row:
+            return None
+        current = int(row["value"])
+        next_value = clamp(current + int(delta), 0, 100)
+        self.conn.execute(
+            "UPDATE faction_clocks SET value = ?, stage = ?, last_delta = ? WHERE id = ?",
+            (next_value, self.clock_stage(next_value), next_value - current, clock_id),
+        )
+        return self.row("SELECT * FROM faction_clocks WHERE id = ?", (clock_id,))
 
     def upsert_event(self, item: dict[str, Any]) -> None:
         self.conn.execute(

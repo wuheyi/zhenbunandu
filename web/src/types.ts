@@ -87,6 +87,19 @@ export type Faction = {
   summary: string;
 };
 
+export type FactionClock = {
+  id: string;
+  title: string;
+  faction_id: string;
+  value: number;
+  stage: number;
+  trigger: string;
+  effect: string;
+  mitigation: string;
+  status: string;
+  last_delta: number;
+};
+
 export type Region = {
   id: string;
   name: string;
@@ -299,6 +312,7 @@ export type GameState = {
   issues: Issue[];
   ministers: Minister[];
   factions: Faction[];
+  faction_clocks: FactionClock[];
   regions: Region[];
   armies: Army[];
   gates: Gate[];

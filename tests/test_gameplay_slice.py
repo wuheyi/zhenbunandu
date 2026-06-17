@@ -30,6 +30,9 @@ def test_new_game_initializes_core_tables(tmp_path: Path) -> None:
     assert any(minister["id"] == "li_gang" for minister in state["ministers"])
     assert len(state["logistics_routes"]) == 3
     assert state["diplomacy"]["status"] == "未接触"
+    assert state["guidance"]["stage"] == "初登大宝"
+    assert any(tip["target"] == "minister:li_gang" for tip in state["guidance"]["tips"])
+    assert state["postmortem"]["status"] == "active"
 
 
 def test_first_turn_creates_directives_secret_and_case(tmp_path: Path) -> None:

@@ -47,6 +47,7 @@
 2. [11-directive-types.md](./11-directive-types.md)
 3. [12-autoplay-balancing.md](./12-autoplay-balancing.md)
 4. [13-new-player-onboarding.md](./13-new-player-onboarding.md)
+5. [16-implementation-gap-analysis.md](./16-implementation-gap-analysis.md)
 
 ## 文档分组
 
@@ -76,6 +77,7 @@
 | [11-directive-types.md](./11-directive-types.md) | 丰富诏令类型、文书形式、行动模板、拟旨校验、回奏 | “圣旨如何从话变成执行链” |
 | [12-autoplay-balancing.md](./12-autoplay-balancing.md) | 自动游玩、路线覆盖、数值护栏、早崩检测、平衡报告 | “怎么防止路线飞天或过早崩盘” |
 | [13-new-player-onboarding.md](./13-new-player-onboarding.md) | 新手引导、首局脚本、渐进揭示、失败复盘 | “第一次当皇帝怎么不懵” |
+| [16-implementation-gap-analysis.md](./16-implementation-gap-analysis.md) | 当前实现对照、缺口、下一批实施顺序 | “现在还差什么” |
 
 ### D. 前端、美术与体验
 
@@ -104,6 +106,7 @@ flowchart TD
   Onboarding["新手引导"]
   Balance["自动游玩平衡"]
   MVP["MVP路线"]
+  Gap["实现缺口"]
 
   Positioning --> Core
   Core --> Court
@@ -126,6 +129,8 @@ flowchart TD
   Directives --> Balance
   MVP --> Architecture
   MVP --> Core
+  MVP --> Gap
+  UX --> Gap
 ```
 
 ## 和当前项目的关系
@@ -150,7 +155,7 @@ flowchart TD
 
 ## 统一命名规范
 
-- 文档编号使用两位数字：`00-` 到 `15-`。
+- 文档编号使用两位数字：当前为 `00-` 到 `16-`。
 - 产品级文档放前面，系统级文档居中，体验与资产文档靠后。
 - 新增文档优先追加编号，不重排旧编号，避免链接失效。
 - 文档标题使用一个一级标题，后续使用二级/三级标题。

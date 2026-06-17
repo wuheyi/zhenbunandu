@@ -17,10 +17,10 @@ import {
   WalletCards
 } from "lucide-react";
 import { api, issueDecreeStream, loadState } from "./api";
-import type { CourtCase, Directive, EventItem, GameState, Gate, LogisticsRoute, Minister, Region } from "./types";
+import type { Army, CourtCase, Directive, EventItem, GameState, Gate, GuidanceTip, Ledger, LogisticsRoute, Minister, Region } from "./types";
 import "./styles.css";
 
-type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm";
+type ModalName = "none" | "audience" | "secret" | "decree" | "report" | "court" | "history" | "debate" | "llm" | "people" | "ledger" | "theater";
 type MapMode = "north" | "city" | "logistics" | "diplomacy";
 
 const portraitIndex: Record<string, number> = {
@@ -33,6 +33,35 @@ const portraitIndex: Record<string, number> = {
   guard_representative: 0,
   jin_envoy: 4
 };
+
+const ministerMap: Record<string, string> = {
+  "李纲": "li_gang",
+  "户部尚书": "finance_minister",
+  "皇城司使": "imperial_city司",
+  "开封府尹": "kaifeng_prefect",
+  "主和宰执": "peace_chancellor",
+  "禁军都虞候": "guard_representative",
+  "转运判官": "transport_judge",
+  "金使": "jin_envoy"
+};
+
+const nodeByInterest: Array<{ match: string[]; mode: MapMode; node: string }> = [
+  { match: ["宣化门", "城防", "李纲", "殿前司"], mode: "city", node: "xuanhua_gate" },
+  { match: ["粮", "户部", "转运", "东仓", "财税"], mode: "logistics", node: "jianghuai" },
+  { match: ["勤王", "西军", "陕西", "种师道"], mode: "diplomacy", node: "shaanxi" },
+  { match: ["金军", "河北", "河东"], mode: "north", node: "hebei_east" },
+  { match: ["主和", "金使", "议和"], mode: "diplomacy", node: "bianjing" }
+];
+
+function focusForEvent(event: EventItem | null): { mode: MapMode; node: string } {
+  const haystack = event ? [...event.interests, ...event.audiences, ...event.actions, event.title, event.summary].join(" ") : "";
+  return nodeByInterest.find((item) => item.match.some((keyword) => haystack.includes(keyword))) || { mode: "north", node: "bianjing" };
+}
+
+function valueTone(value: number, dangerHigh = false): "danger" | "warn" | "good" {
+  if (dangerHigh) return value >= 65 ? "danger" : value >= 42 ? "warn" : "good";
+  return value <= 35 ? "danger" : value <= 58 ? "warn" : "good";
+}
 
 function App() {
   const [state, setState] = React.useState<GameState | null>(null);
@@ -81,6 +110,36 @@ function App() {
     setModal("audience");
   };
 
+  const jumpToTarget = React.useCallback((target: string) => {
+    const [kind, first, second] = target.split(":");
+    if (kind === "minister" && first) {
+      openAudience(first);
+      return;
+    }
+    if (kind === "map" && first) {
+      setMapMode(first as MapMode);
+      if (second) setSelectedNode(second);
+      return;
+    }
+    if (kind === "event" && first) {
+      setSelectedEventId(first);
+      const event = state?.events.find((item) => item.id === first) || null;
+      const focus = focusForEvent(event);
+      setMapMode(focus.mode);
+      setSelectedNode(focus.node);
+      return;
+    }
+    if (["secret", "decree", "report", "court", "history", "debate", "people", "ledger", "theater"].includes(kind)) {
+      setModal(kind as ModalName);
+    }
+  }, [state?.events]);
+
+  const focusSelectedEventOnMap = React.useCallback((event: EventItem) => {
+    const focus = focusForEvent(event);
+    setMapMode(focus.mode);
+    setSelectedNode(focus.node);
+  }, []);
+
   if (!state) {
     return (
       <div className="loading-screen">
@@ -98,6 +157,7 @@ function App() {
       <main className="war-desk">
         <aside className="left-scroll">
           <DoomClock state={state} />
+          <GuidancePanel guidance={state.guidance} onTarget={jumpToTarget} />
           <section className="paper-panel memorial-stack">
             <PanelTitle icon={<ScrollText size={18} />} title="本月急奏" />
             {state.events.filter((event) => event.status === "active").map((event) => (
@@ -107,6 +167,8 @@ function App() {
                 active={event.id === selectedEvent?.id}
                 onClick={() => setSelectedEventId(event.id)}
                 onAudience={openAudience}
+                onFocusMap={focusSelectedEventOnMap}
+                onTarget={jumpToTarget}
               />
             ))}
           </section>
@@ -203,6 +265,9 @@ function App() {
         onCourt={() => setModal("court")}
         onReport={() => setModal("report")}
         onHistory={() => setModal("history")}
+        onPeople={() => setModal("people")}
+        onLedger={() => setModal("ledger")}
+        onTheater={() => setModal("theater")}
       />
 
       {modal === "audience" && selectedMinister && (
@@ -291,6 +356,18 @@ function App() {
         <HistoryModal state={state} onClose={() => setModal("none")} />
       )}
 
+      {modal === "people" && (
+        <PeopleModal state={state} selectedId={selectedMinisterId} onSelect={setSelectedMinisterId} onAudience={openAudience} onClose={() => setModal("none")} />
+      )}
+
+      {modal === "ledger" && (
+        <LedgerModal state={state} onClose={() => setModal("none")} />
+      )}
+
+      {modal === "theater" && (
+        <TheaterModal state={state} onClose={() => setModal("none")} />
+      )}
+
       {modal === "llm" && (
         <LLMModal onClose={() => setModal("none")} onRefresh={refresh} />
       )}
@@ -344,6 +421,29 @@ function DoomClock({ state }: { state: GameState }) {
   );
 }
 
+function GuidancePanel({ guidance, onTarget }: { guidance: GameState["guidance"]; onTarget: (target: string) => void }) {
+  return (
+    <section className="paper-panel guidance-panel">
+      <PanelTitle icon={<BookOpen size={18} />} title={`御前小注 · ${guidance.stage}`} />
+      <p className="guidance-priority">{guidance.priority}</p>
+      <div className="guidance-list">
+        {guidance.tips.map((tip: GuidanceTip) => (
+          <button key={`${tip.title}-${tip.target}`} className="guidance-tip" onClick={() => onTarget(tip.target)}>
+            <b>{tip.title}</b>
+            <span>{tip.body}</span>
+            <em>{tip.action}</em>
+          </button>
+        ))}
+      </div>
+      {guidance.risk_flags.length ? (
+        <div className="risk-flags">
+          {guidance.risk_flags.map((flag) => <span key={flag}>{flag}</span>)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function Situation({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
   return (
     <div className="situation">
@@ -362,15 +462,24 @@ function PanelTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
   );
 }
 
-function MemorialCard({ event, active, onClick, onAudience }: { event: EventItem; active: boolean; onClick: () => void; onAudience: (id: string) => void }) {
+function MemorialCard({
+  event,
+  active,
+  onClick,
+  onAudience,
+  onFocusMap,
+  onTarget
+}: {
+  event: EventItem;
+  active: boolean;
+  onClick: () => void;
+  onAudience: (id: string) => void;
+  onFocusMap: (event: EventItem) => void;
+  onTarget: (target: string) => void;
+}) {
   const primaryAudience = event.audiences[0] || "";
-  const ministerMap: Record<string, string> = {
-    "李纲": "li_gang",
-    "户部尚书": "finance_minister",
-    "皇城司使": "imperial_city司",
-    "开封府尹": "kaifeng_prefect",
-    "主和宰执": "peace_chancellor"
-  };
+  const canSecret = event.actions.some((action) => action.includes("密查") || action.includes("查账"));
+  const canDraft = event.actions.some((action) => action.includes("发") || action.includes("修") || action.includes("补") || action.includes("任命"));
   return (
     <article className={`memorial-card ${active ? "active" : ""}`} onClick={onClick}>
       <div className="memorial-head">
@@ -386,6 +495,19 @@ function MemorialCard({ event, active, onClick, onAudience }: { event: EventItem
         <button onClick={(e) => { e.stopPropagation(); onAudience(ministerMap[primaryAudience] || "li_gang"); }}>
           召见相关人
         </button>
+        <button onClick={(e) => { e.stopPropagation(); onFocusMap(event); }}>
+          看盘面
+        </button>
+        {canSecret && (
+          <button onClick={(e) => { e.stopPropagation(); onTarget("secret"); }}>
+            密查
+          </button>
+        )}
+        {canDraft && (
+          <button onClick={(e) => { e.stopPropagation(); onTarget("decree"); }}>
+            拟旨
+          </button>
+        )}
       </div>
     </article>
   );
@@ -512,12 +634,16 @@ function CommandDock(props: {
   onCourt: () => void;
   onReport: () => void;
   onHistory: () => void;
+  onPeople: () => void;
+  onLedger: () => void;
+  onTheater: () => void;
 }) {
   const readyCases = props.state.court_cases.filter((item) => item.status === "ready").length;
   return (
     <nav className="command-dock" aria-label="御案操作">
       <CommandButton icon={<MessageSquareText />} label="召见" sub="问政" onClick={props.onAudience} />
       <CommandButton icon={<Landmark />} label="朝议" sub={(props.state.court_debates || []).length ? "已有议案" : "战和"} onClick={props.onDebate} />
+      <CommandButton icon={<Landmark />} label="人物" sub="关系" onClick={props.onPeople} />
       <CommandButton icon={<Eye />} label="密令" sub={`${props.state.secret_orders.filter((o) => o.status === "active").length} 进行中`} onClick={props.onSecret} />
       <CommandButton icon={<Scale />} label="对质" sub={readyCases ? `${readyCases} 案可开` : "证据不足"} onClick={props.onCourt} />
       <CommandButton icon={<FilePenLine />} label="拟旨" sub={`${props.state.directives.filter((d) => d.status !== "issued").length} 道草案`} onClick={props.onDecree} />
@@ -525,6 +651,8 @@ function CommandDock(props: {
         <Stamp size={32} />
         <span>颁诏</span>
       </button>
+      <CommandButton icon={<MapPinned />} label="战区" sub="军地" onClick={props.onTheater} />
+      <CommandButton icon={<WalletCards />} label="账本" sub={`${props.state.ledger.length} 条`} onClick={props.onLedger} />
       <CommandButton icon={<BookOpen />} label="回奏" sub="月末" onClick={props.onReport} />
       <CommandButton icon={<ScrollText />} label="史册" sub="旧事" onClick={props.onHistory} />
     </nav>
@@ -820,6 +948,7 @@ function ReportModal({ state, onClose }: { state: GameState; onClose: () => void
           <h2>{report.title}</h2>
           <p className="report-summary">{report.summary}</p>
           {state.game.ended ? <div className="ending-banner">{state.game.ending}</div> : null}
+          {state.game.ended ? <PostmortemReview state={state} /> : null}
           <div className="report-grid">
             <section>
               <h3>大事时间线</h3>
@@ -854,10 +983,45 @@ function ReportModal({ state, onClose }: { state: GameState; onClose: () => void
                 <small>{latestBattle.reasons.join(" / ")}</small>
               </section>
             ) : null}
+            <ReportTrace state={state} report={report} />
           </div>
         </div>
       ) : <p>尚未有月末回奏。先颁诏推进一回合。</p>}
     </Modal>
+  );
+}
+
+function ReportTrace({ state, report }: { state: GameState; report: GameState["reports"][number] }) {
+  const changedMetrics = Object.entries(report.metrics_delta).filter(([, value]) => value !== 0);
+  const hotFaction = [...state.factions].sort((a, b) => b.backlash - a.backlash)[0];
+  const hotRoute = [...state.logistics_routes].sort((a, b) => b.risk - a.risk)[0];
+  return (
+    <section className="report-trace-card">
+      <h3>变化追溯</h3>
+      {changedMetrics.map(([key, value]) => (
+        <p key={key}><b>{key}</b> {value >= 0 ? "改善" : "承压"}，来源为本月诏令执行、京城消耗或殿前裁断。</p>
+      ))}
+      {hotRoute ? <p><b>{hotRoute.name}</b> 当前风险 {hotRoute.risk}，状态 {hotRoute.status}。</p> : null}
+      {hotFaction ? <p><b>{hotFaction.name}</b> 反扑 {hotFaction.backlash}，亲疏 {hotFaction.affinity}。</p> : null}
+    </section>
+  );
+}
+
+function PostmortemReview({ state }: { state: GameState }) {
+  return (
+    <section className="postmortem-card">
+      <h3>失败复盘</h3>
+      <div className="postmortem-grid">
+        <div>
+          <b>关键原因</b>
+          {state.postmortem.reasons.map((reason) => <p key={reason}>· {reason}</p>)}
+        </div>
+        <div>
+          <b>下一局建议</b>
+          {state.postmortem.recommendations.map((item) => <p key={item}>· {item}</p>)}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -874,6 +1038,235 @@ function HistoryModal({ state, onClose }: { state: GameState; onClose: () => voi
         ))}
       </div>
     </Modal>
+  );
+}
+
+function PeopleModal({
+  state,
+  selectedId,
+  onSelect,
+  onAudience,
+  onClose
+}: {
+  state: GameState;
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onAudience: (id: string) => void;
+  onClose: () => void;
+}) {
+  const selected = state.ministers.find((minister) => minister.id === selectedId) || state.ministers[0];
+  const sameGroup = state.ministers.filter((minister) => minister.group_name === selected.group_name && minister.id !== selected.id);
+  const implicated = state.evidence.filter((item) => item.implicated.some((name) => selected.name.includes(name) || name.includes(selected.name)));
+  const relatedFaction = state.factions.find((faction) => selected.group_name.includes(faction.name.slice(0, 2)) || selected.stance.includes(faction.name.slice(0, 2))) || state.factions.find((faction) => faction.summary.includes(selected.group_name));
+  return (
+    <Modal title="人物档案" onClose={onClose} wide>
+      <div className="people-layout">
+        <section className="people-list">
+          {state.ministers.map((minister) => (
+            <button key={minister.id} className={`people-row ${minister.id === selected.id ? "active" : ""}`} onClick={() => onSelect(minister.id)}>
+              <Portrait id={minister.id} />
+              <span>
+                <b>{minister.name}</b>
+                <small>{minister.office} · {minister.stance}</small>
+              </span>
+            </button>
+          ))}
+        </section>
+        <section className="person-detail">
+          <div className="person-hero">
+            <Portrait id={selected.id} />
+            <div>
+              <h2>{selected.name}</h2>
+              <p>{selected.office} · {selected.group_name}</p>
+              <p>{selected.summary}</p>
+              <button className="cinnabar" onClick={() => onAudience(selected.id)}>召见问政</button>
+            </div>
+          </div>
+          <div className="stat-columns wide-stats">
+            <span>忠诚 {selected.loyalty}</span>
+            <span>能力 {selected.ability}</span>
+            <span>廉直 {selected.integrity}</span>
+            <span>胆略 {selected.courage}</span>
+            <span>声望 {selected.prestige}</span>
+            <span>专长 {selected.skill}</span>
+          </div>
+          <div className="relation-grid">
+            <div>
+              <h3>关系判断</h3>
+              {sameGroup.length ? sameGroup.map((minister) => (
+                <p key={minister.id}>· 与 {minister.name} 同属{selected.group_name}，可互相背书，也可能互相牵连。</p>
+              )) : <p>· 朝中暂无同组活跃人物。</p>}
+              {relatedFaction ? <p>· 牵涉 {relatedFaction.name}：影响 {relatedFaction.influence}，反扑 {relatedFaction.backlash}。</p> : null}
+              {implicated.length ? implicated.map((item) => <p key={item.id}>· 被 {item.title} 牵涉，公开风险：{item.risk_if_revealed}</p>) : null}
+            </div>
+            <div>
+              <h3>派系温度</h3>
+              {state.factions.map((faction) => (
+                <div className="faction-line" key={faction.id}>
+                  <span>{faction.name}</span>
+                  <Progress value={faction.backlash} tone={valueTone(faction.backlash, true)} />
+                  <small>亲疏 {faction.affinity} · 恐惧 {faction.fear}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+    </Modal>
+  );
+}
+
+function LedgerModal({ state, onClose }: { state: GameState; onClose: () => void }) {
+  const resourceMetrics = state.metrics.filter((metric) => ["国库", "内帑", "京城粮"].includes(metric.key));
+  return (
+    <Modal title="财政流水" onClose={onClose} wide>
+      <div className="ledger-layout">
+        <section className="resource-ledger">
+          {resourceMetrics.map((metric) => (
+            <div className="resource-tile" key={metric.key}>
+              <span>{metric.key}</span>
+              <b>{metric.value}</b>
+              <small>{metric.last_delta ? `上次变化 ${metric.last_delta > 0 ? "+" : ""}${metric.last_delta}` : "上次无变化"}</small>
+            </div>
+          ))}
+          <div className="ledger-note">
+            <b>钱粮口径</b>
+            <p>国库、内帑、京城粮的公开变化会进入账本；密令和派系暗耗暂由回奏与史册记录。</p>
+          </div>
+        </section>
+        <section className="ledger-table-wrap">
+          {state.ledger.length ? (
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>回合</th>
+                  <th>账户</th>
+                  <th>变化</th>
+                  <th>余额</th>
+                  <th>类别</th>
+                  <th>来源</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.ledger.map((row: Ledger) => (
+                  <tr key={row.id}>
+                    <td>{row.turn}</td>
+                    <td>{row.account}</td>
+                    <td className={row.delta >= 0 ? "delta-up" : "delta-down"}>{row.delta >= 0 ? "+" : ""}{row.delta}</td>
+                    <td>{row.balance_after}</td>
+                    <td>{row.category}</td>
+                    <td>{row.source}</td>
+                    <td>{row.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted">尚无流水。颁诏、补饷、追赃或月末结算后会写入账本。</p>
+          )}
+        </section>
+      </div>
+    </Modal>
+  );
+}
+
+function TheaterModal({ state, onClose }: { state: GameState; onClose: () => void }) {
+  const [tab, setTab] = React.useState<"regions" | "armies" | "gates" | "routes">("regions");
+  return (
+    <Modal title="地区与军队详情" onClose={onClose} wide>
+      <div className="detail-tabs" role="tablist" aria-label="战区详情">
+        <button className={tab === "regions" ? "active" : ""} onClick={() => setTab("regions")}>地区</button>
+        <button className={tab === "armies" ? "active" : ""} onClick={() => setTab("armies")}>军队</button>
+        <button className={tab === "gates" ? "active" : ""} onClick={() => setTab("gates")}>城门</button>
+        <button className={tab === "routes" ? "active" : ""} onClick={() => setTab("routes")}>路线</button>
+      </div>
+      {tab === "regions" && (
+        <div className="detail-grid">
+          {state.regions.map((region) => <RegionDetailCard key={region.id} region={region} />)}
+        </div>
+      )}
+      {tab === "armies" && (
+        <div className="detail-grid">
+          {state.armies.map((army) => <ArmyDetailCard key={army.id} army={army} />)}
+        </div>
+      )}
+      {tab === "gates" && (
+        <div className="detail-grid">
+          {state.gates.map((gate) => <GateDetailCard key={gate.id} gate={gate} />)}
+        </div>
+      )}
+      {tab === "routes" && (
+        <div className="detail-grid">
+          {state.logistics_routes.map((route) => <RouteDetailCard key={route.id} route={route} />)}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function RegionDetailCard({ region }: { region: Region }) {
+  return (
+    <article className="detail-card">
+      <h3>{region.name}</h3>
+      <p>{region.kind} · 粮储 {region.grain_stock} · 税力 {region.tax_capacity}</p>
+      <MetricLine label="控制" value={region.control} />
+      <MetricLine label="民心" value={region.public_support} />
+      <MetricLine label="军事压力" value={region.military_pressure} dangerHigh />
+      <MetricLine label="路线风险" value={region.route_risk} dangerHigh />
+    </article>
+  );
+}
+
+function ArmyDetailCard({ army }: { army: Army }) {
+  return (
+    <article className="detail-card">
+      <h3>{army.name}</h3>
+      <p>{army.commander} · {army.location} · {army.stance}</p>
+      <div className="mini-stats">
+        <span>兵力 {army.manpower}</span>
+        <span>欠饷 {army.arrears}</span>
+      </div>
+      <MetricLine label="士气" value={army.morale} />
+      <MetricLine label="训练" value={army.training} />
+      <MetricLine label="装备" value={army.equipment} />
+      <MetricLine label="补给" value={army.supply} />
+    </article>
+  );
+}
+
+function GateDetailCard({ gate }: { gate: Gate }) {
+  return (
+    <article className="detail-card">
+      <h3>{gate.name}</h3>
+      <p>{gate.status} · 守将 {gate.commander} · 驻守 {gate.garrison}</p>
+      <MetricLine label="坚固" value={gate.condition} />
+      <MetricLine label="内应风险" value={gate.risk} dangerHigh />
+      <MetricLine label="器械" value={gate.equipment} />
+    </article>
+  );
+}
+
+function RouteDetailCard({ route }: { route: LogisticsRoute }) {
+  return (
+    <article className="detail-card">
+      <h3>{route.name}</h3>
+      <p>{route.origin} → {route.destination} · {route.status} · ETA {route.eta}</p>
+      <MetricLine label="容量" value={route.capacity} />
+      <MetricLine label="风险" value={route.risk} dangerHigh />
+      <MetricLine label="截留" value={route.corruption} dangerHigh />
+      <MetricLine label="护送" value={route.escort} />
+    </article>
+  );
+}
+
+function MetricLine({ label, value, dangerHigh }: { label: string; value: number; dangerHigh?: boolean }) {
+  return (
+    <div className="metric-line">
+      <span>{label}</span>
+      <Progress value={value} tone={valueTone(value, dangerHigh)} />
+      <b>{value}</b>
+    </div>
   );
 }
 

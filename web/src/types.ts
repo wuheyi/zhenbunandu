@@ -104,6 +104,22 @@ export type Region = {
   y: number;
 };
 
+export type Army = {
+  id: string;
+  name: string;
+  commander: string;
+  location: string;
+  manpower: number;
+  morale: number;
+  training: number;
+  equipment: number;
+  supply: number;
+  arrears: number;
+  loyalty: number;
+  mobility: number;
+  stance: string;
+};
+
 export type Gate = {
   id: string;
   name: string;
@@ -253,6 +269,27 @@ export type Memory = {
   tags: string;
 };
 
+export type GuidanceTip = {
+  title: string;
+  body: string;
+  action: string;
+  target: string;
+};
+
+export type Guidance = {
+  stage: string;
+  priority: string;
+  tips: GuidanceTip[];
+  risk_flags: string[];
+};
+
+export type Postmortem = {
+  status: string;
+  ending?: string;
+  reasons: string[];
+  recommendations: string[];
+};
+
 export type GameState = {
   game: GameHeader;
   metrics: Metric[];
@@ -263,6 +300,7 @@ export type GameState = {
   ministers: Minister[];
   factions: Faction[];
   regions: Region[];
+  armies: Army[];
   gates: Gate[];
   logistics_routes: LogisticsRoute[];
   directives: Directive[];
@@ -275,4 +313,6 @@ export type GameState = {
   ledger: Ledger[];
   memories: Memory[];
   llm_configured: boolean;
+  guidance: Guidance;
+  postmortem: Postmortem;
 };

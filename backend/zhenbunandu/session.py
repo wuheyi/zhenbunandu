@@ -54,6 +54,191 @@ class GameSession:
     def _llm_client(self) -> LLMClient:
         return LLMClient(self.db.get_setting("llm", {}) or {})
 
+    def _build_guidance(
+        self,
+        game: dict[str, Any],
+        metrics: list[dict[str, Any]],
+        siege: dict[str, Any],
+        events: list[dict[str, Any]],
+        directives: list[dict[str, Any]],
+        cases: list[dict[str, Any]],
+        routes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        metric_map = {item["key"]: int(item["value"]) for item in metrics}
+        active_directives = [item for item in directives if item["status"] in {"draft", "confirmed"}]
+        ready_cases = [item for item in cases if item["status"] == "ready"]
+        active_events = [item for item in events if item["status"] == "active"]
+        turn = int(game.get("turn", 1))
+        tips: list[dict[str, str]] = []
+        risk_flags: list[str] = []
+
+        if int(game.get("ended", 0)):
+            return {
+                "stage": "复盘",
+                "priority": "本局已结束，先看结局复盘和最近月末回奏。",
+                "tips": [
+                    {
+                        "title": "查看失败原因",
+                        "body": "回奏中会列出拖垮局势的关键链条，可据此调整下一局前三回合。",
+                        "action": "打开月末回奏",
+                        "target": "report",
+                    }
+                ],
+                "risk_flags": [],
+            }
+
+        if turn == 1:
+            stage = "初登大宝"
+            priority = "先处理金军、禁军欠饷、李纲请守三件急务。"
+            if not any("李纲" in item["title"] for item in active_directives):
+                tips.append(
+                    {
+                        "title": "稳住宣化门",
+                        "body": "召见李纲可生成守城草案，影响后续宣化门夜攻判定。",
+                        "action": "召见李纲",
+                        "target": "minister:li_gang",
+                    }
+                )
+            if not any("急饷" in item["title"] or "内帑" in item["title"] for item in active_directives):
+                tips.append(
+                    {
+                        "title": "先补禁军急饷",
+                        "body": "欠饷会削弱守军战意，户部方案会把钱粮来源写入草案。",
+                        "action": "召见户部",
+                        "target": "minister:finance_minister",
+                    }
+                )
+            if not any("军饷" in item["title"] for item in self.db.rows("SELECT title FROM secret_orders WHERE status = 'active'")):
+                tips.append(
+                    {
+                        "title": "暗查东仓账册",
+                        "body": "密令会在月末产出证据，为第二回合殿前对质埋下爽点。",
+                        "action": "交付密令",
+                        "target": "secret",
+                    }
+                )
+        elif ready_cases:
+            stage = "证据与对质"
+            priority = "证据已到御前，适合开殿前对质形成清算反馈。"
+            tips.append(
+                {
+                    "title": "开禁军欠饷案",
+                    "body": "东仓副册可公开使用，裁断会影响国库、君威、禁军战意和财税派系反扑。",
+                    "action": "开殿前对质",
+                    "target": "court",
+                }
+            )
+        else:
+            stage = "围城筹备"
+            priority = "用朝议把勤王、粮价、议和三条压力拆成可执行草案。"
+            if int(siege.get("qinwang_response", 0)) < 40:
+                tips.append(
+                    {
+                        "title": "催发勤王",
+                        "body": "勤王响应偏低，陕西西军路线会继续迟滞，需赏格和粮草承诺。",
+                        "action": "开朝议",
+                        "target": "debate",
+                    }
+                )
+            if int(siege.get("grain_price", 100)) >= 135 or metric_map.get("京城粮", 0) <= 24:
+                tips.append(
+                    {
+                        "title": "压住京城粮价",
+                        "body": "粮价会转化为民心与守军战意压力，可用开仓平粜或催江淮粮道处理。",
+                        "action": "看粮运财税",
+                        "target": "map:logistics:jianghuai",
+                    }
+                )
+            if int(siege.get("jin_pressure", 0)) >= 68:
+                tips.append(
+                    {
+                        "title": "准备夜攻检验",
+                        "body": "金军威压已高，城门、器械、守军战意会共同影响战报结果。",
+                        "action": "看汴京城防",
+                        "target": "map:city:xuanhua_gate",
+                    }
+                )
+
+        if not tips and active_events:
+            event = active_events[0]
+            tips.append(
+                {
+                    "title": event["title"],
+                    "body": event["summary"],
+                    "action": "查看急奏",
+                    "target": f"event:{event['id']}",
+                }
+            )
+
+        if int(siege.get("jin_pressure", 0)) >= 70:
+            risk_flags.append("金军威压逼近强攻阈值。")
+        if int(siege.get("peace_pressure", 0)) >= 65:
+            risk_flags.append("主和压力过高，可能压低君威并触发屈辱和议。")
+        if int(siege.get("gate_risk", 0)) >= 55:
+            risk_flags.append("城门内应风险偏高，夜值与排查需要跟上。")
+        if int(siege.get("grain_price", 100)) >= 160:
+            risk_flags.append("粮价进入恐慌区，会持续伤民心和守军战意。")
+        if metric_map.get("京城粮", 999) <= 18:
+            risk_flags.append("京城粮储偏低，围城消耗会快速拖垮局势。")
+        stalled_route = next((route for route in routes if int(route.get("risk", 0)) >= 55 or int(route.get("eta", 0)) >= 4), None)
+        if stalled_route:
+            risk_flags.append(f"{stalled_route['name']}迟滞，需查账、护粮或补赏格。")
+
+        return {
+            "stage": stage,
+            "priority": priority,
+            "tips": tips[:4],
+            "risk_flags": risk_flags[:4],
+        }
+
+    def _build_postmortem(
+        self,
+        game: dict[str, Any],
+        metrics: list[dict[str, Any]],
+        siege: dict[str, Any],
+        issues: list[dict[str, Any]],
+        routes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not int(game.get("ended", 0)):
+            return {"status": "active", "reasons": [], "recommendations": []}
+
+        metric_map = {item["key"]: int(item["value"]) for item in metrics}
+        issue_map = {item["id"]: int(item["value"]) for item in issues}
+        reasons: list[str] = []
+        recommendations: list[str] = []
+
+        if int(siege.get("city_defense", 0)) <= 35 or issue_map.get("defend_bianjing", 0) < -25:
+            reasons.append("汴京守备长期不足，城墙、器械或守将没有形成合力。")
+            recommendations.append("第一回合优先召见李纲，明确承办人与工部、殿前司资源。")
+        if int(siege.get("defender_will", 0)) <= 40 or issue_map.get("discipline_guards", 0) < -25:
+            reasons.append("禁军欠饷和军纪拖低守军战意。")
+            recommendations.append("补发急饷要和核验营册、密查账册一起做，避免只申饬不补钱。")
+        if int(siege.get("peace_pressure", 0)) >= 70 or metric_map.get("君威", 100) <= 40:
+            reasons.append("主和压力压过君威，朝堂开始绕开圣断。")
+            recommendations.append("议和可以拖时间，但同时要修城、催勤王，并守住割地质子底线。")
+        if int(siege.get("qinwang_response", 0)) <= 35 or issue_map.get("qinwang_call", 0) < -35:
+            reasons.append("勤王响应不足，汴京缺少外部解围希望。")
+            recommendations.append("发勤王诏时写清赏格、军粮来源和接应路线。")
+        if int(siege.get("grain_price", 100)) >= 165 or metric_map.get("京城粮", 999) <= 16:
+            reasons.append("粮价与粮储恶化，民心和守城耐力被持续消耗。")
+            recommendations.append("尽早开仓平粜，同时催江淮粮道，避免只消耗京城存粮。")
+        route = next((item for item in routes if item["id"] == "jianghuai_grain_to_bianjing"), None)
+        if route and int(route.get("risk", 0)) >= 58:
+            reasons.append("江淮粮道风险过高，粮船迟滞没有被及时处理。")
+            recommendations.append("用查账、护粮、提高运费或改道降低粮运风险。")
+
+        if not reasons:
+            reasons.append("本局并非单点崩盘，而是金军、粮价、勤王和朝堂压力叠加。")
+        if not recommendations:
+            recommendations.append("下一局前三回合保持守城、补饷、密查、勤王四条线并行。")
+
+        return {
+            "status": "ended",
+            "ending": game.get("ending", ""),
+            "reasons": reasons[:5],
+            "recommendations": recommendations[:5],
+        }
+
     def test_llm(self) -> dict[str, Any]:
         client = self._llm_client()
         fallback = "未配置 API key；当前将使用确定性规则结算。"
@@ -177,20 +362,25 @@ class GameSession:
         for debate in debates:
             debate["options"] = json.loads(debate.pop("options_json") or "[]")
             debate["speakers"] = json.loads(debate.pop("speakers_json") or "[]")
+        directives = self.db.rows("SELECT * FROM directives ORDER BY id")
+        issues = self.db.rows("SELECT * FROM issues ORDER BY rowid")
+        routes = self.db.rows("SELECT * FROM logistics_routes ORDER BY rowid")
+        guidance = self._build_guidance(game, metrics, siege, events, directives, cases, routes)
+        postmortem = self._build_postmortem(game, metrics, siege, issues, routes)
         return {
             "game": game,
             "metrics": metrics,
             "siege": siege,
             "diplomacy": self.db.row("SELECT * FROM diplomacy_state WHERE id = 1") or {},
             "events": events,
-            "issues": self.db.rows("SELECT * FROM issues ORDER BY rowid"),
+            "issues": issues,
             "ministers": self.db.rows("SELECT * FROM characters ORDER BY rowid"),
             "factions": self.db.rows("SELECT * FROM factions ORDER BY rowid"),
             "regions": self.db.rows("SELECT * FROM regions ORDER BY rowid"),
             "armies": self.db.rows("SELECT * FROM armies ORDER BY rowid"),
             "gates": self.db.rows("SELECT * FROM city_gates ORDER BY rowid"),
-            "logistics_routes": self.db.rows("SELECT * FROM logistics_routes ORDER BY rowid"),
-            "directives": self.db.rows("SELECT * FROM directives ORDER BY id"),
+            "logistics_routes": routes,
+            "directives": directives,
             "secret_orders": orders,
             "evidence": evidence,
             "court_cases": cases,
@@ -201,6 +391,8 @@ class GameSession:
             "memories": self.db.rows("SELECT * FROM memories ORDER BY id DESC LIMIT 12"),
             "llm_configured": bool((self.db.get_setting("llm", {}) or {}).get("api_key")),
             "directive_templates": self.content.directive_templates,
+            "guidance": guidance,
+            "postmortem": postmortem,
         }
 
     def minister_chat(self, minister_id: str, message: str = "") -> dict[str, Any]:

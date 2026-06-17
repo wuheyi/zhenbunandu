@@ -12,6 +12,7 @@
 - MVP 路线：[09-mvp-roadmap.md](./09-mvp-roadmap.md)
 - 前端体验：[14-frontend-experience.md](./14-frontend-experience.md)
 - 美术提示词：[15-art-asset-prompts.md](./15-art-asset-prompts.md)
+- 实现对照：[16-implementation-gap-analysis.md](./16-implementation-gap-analysis.md)
 
 ## 当前文档状态
 
@@ -25,4 +26,4 @@
 - 新手引导。
 - UI 风格、前端体验和美术素材提示词。
 
-这些文档目前是设计稿，不包含代码实现。
+除实现对照文档外，这些文档主要是设计稿；代码进展请参考 [16-implementation-gap-analysis.md](./16-implementation-gap-analysis.md)。
